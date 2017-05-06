@@ -1,0 +1,22 @@
+{
+  "name": "tools",
+  "version": "1.0.0",
+  "description": "Misc tools",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kojiishi/tools.git"
+  },
+  "author": "Koji Ishii",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kojiishi/tools/issues"
+  },
+  "homepage": "https://github.com/kojiishi/tools#readme",
+  "devDependencies": {
+    "minimist": "^1.2.0"
+  }
+}

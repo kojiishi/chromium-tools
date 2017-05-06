@@ -1,0 +1,345 @@
+#!/usr/bin/env node
+'use strict';
+const fs = require('fs');
+const path = require('path');
+
+const minimist = requireOrNull('../minimist') || require('minimist');
+const options = minimist(process.argv.slice(2), {
+  boolean: ['remove', 'verbose'],
+  string: ['bug', 'file', 'pass'],
+  alias: {
+    b: 'bug',
+    f: 'file',
+    p: 'pass',
+    r: 'remove',
+    v: 'verbose',
+  },
+  unknown: arg => {
+    if (arg.startsWith('-')) {
+      throw new Error(`Unknown option ${arg}
+Usage: ${path.basename(__filename)} [options] [results.json...]
+  -b <bug>: The bug number/string for new entries.
+  -f <file>: The TestExpectations file path.
+  -p <n>: Remove entries if consecutive pass counts >= <n>.
+          When <n> is 'a', the number of [results.json] is used.
+  -r: Remove entries where test files are missing in the local file system.
+`);
+    }
+    return true;
+  },
+});
+const args = options._;
+const statistics = {
+  Pass: 0,
+  Failure: 0,
+  Crash: 0,
+  Timeout: 0,
+};
+
+class TestExpectation {
+  constructor(bug, testPath, expectations) {
+    this.bug = bug;
+    this.path = testPath;
+    this.expectations = expectations;
+    this.consecutivePass = 0;
+  }
+
+  static parse(line) {
+    if (line.expectations)
+      return line;
+    let match = line.match(/^(\S*)\s+(\S+)\s+\[\s*([^\]]+)]/);
+    if (match) {
+      return new TestExpectation(match[1], match[2], match[3].trim().split(/\s+/));
+    }
+    return null;
+  }
+
+  get filePath() {
+    return this.path.replace(/^virtual\/[^/]*\//, '');
+  }
+
+  toString() {
+    return `${this.bug ? this.bug : ''} ${this.path} [ ${this.expectations.join(' ')} ]`;
+  }
+
+  updateExpectations(result) {
+    if (this.expectations.length == 1 &&
+        (this.expectations[0] == 'Skip' ||
+         this.expectations[0] == 'NeedsRebaseline' ||
+         this.expectations[0] == 'NeedsManualRebaseline')) {
+      return false;
+    }
+    //log(`${this.path}: ${result.actual}`);
+    result.is_unexpected = false;
+    this.updateConsecutivePass(result.actual);
+    return this.addActual(result.actual);
+  }
+
+  addActual(actuals) {
+    let addCount = 0;
+    actuals = actuals.split(/ +/);
+    for (let actual of actuals) {
+      actual = TestExpectation.expectFromActual(actual);
+      if (!actual)
+        continue;
+      if (!this.expectations.includes(actual)) {
+        log(`Adding ${actual} to ${this.path}`);
+        this.expectations.push(actual);
+        addCount++;
+        statistics[actual]++;
+      }
+    }
+    if (addCount)
+      this.expectations.sort();
+    return addCount;
+  }
+
+  updateConsecutivePass(actual) {
+    if (actual == 'PASS')
+      this.consecutivePass++;
+    else
+      this.consecutivePass = 0;
+  }
+
+  exists(testRoot) {
+    return fs.existsSync(path.resolve(testRoot, this.filePath));
+  }
+
+  static expectFromActual(actual) {
+    switch (actual) {
+      case 'PASS':
+        return 'Pass';
+      case 'IMAGE':
+      case 'TEXT':
+      case 'IMAGE+TEXT':
+        return 'Failure';
+      case 'CRASH':
+        return 'Crash';
+      case 'TIMEOUT':
+        return 'Timeout';
+      case 'SKIP':
+      case 'MISSING':
+        return null;
+    }
+    throw new Error(`Unknown actual ${actual}`);
+  }
+}
+
+class TestExpectations {
+  constructor(file) {
+    this.path = file;
+    log(`Reading expectations file from ${file}`);
+    let inputText = fs.readFileSync(file, 'utf8');
+    this.lines = inputText.trimRight().split(/\r?\n/);
+  }
+
+  write() {
+    fs.writeFileSync(this.path, this.lines.join('\n') + '\n', 'utf8');
+  }
+
+  removeIfNotExists(testRootDir) {
+    if (!testRootDir)
+      testRootDir = TestExpectations.findTestRootDir(this.path);
+    log(`Checking non-existent tests in ${testRootDir}`);
+    return this.removeIf(test => {
+      if (test.path && !test.exists(testRootDir)) {
+        log(`Removing non-existent test: ${test.path}`);
+        return true;
+      }
+      return false;
+    });
+  }
+
+  removeConsecutivePass(minCount) {
+    log(`Checking consecutive pass >= ${minCount}`);
+    return this.removeIf(test => {
+      if (test.consecutivePass >= minCount) {
+        log(`Removing consecutive pass ${test.consecutivePass}: ${test.path}`);
+        return true;
+      }
+      return false;
+    });
+  }
+
+  removeIf(condition) {
+    let count = 0;
+    this.forAll(test => {
+      if (condition(test)) {
+        count++;
+        return null;
+      }
+      return test;
+    });
+    return count;
+  }
+
+  forAll(filter) {
+    let output = [];
+    for (let line of this.lines) {
+      let test = TestExpectation.parse(line);
+      if (test) {
+        test = filter(test);
+        if (!test)
+          continue;
+        line = test;
+      }
+      output.push(line);
+    }
+    this.lines = output;
+  }
+
+  static findTestRootDir(dir) {
+    // Traverse ancestor directories to find the test root.
+    for (dir = dir || '.';;) {
+      if (fs.existsSync(path.resolve(dir, 'TestExpectations')))
+        return dir;
+      let parent = path.resolve(dir, '..');
+      if (parent == dir)
+        return null;
+      dir = parent;
+    }
+  }
+}
+
+class TestResults {
+  constructor(file) {
+    if (!file) {
+      file = TestResults.defaultPath;
+    }
+    log(`Loading results from ${file}`);
+    let content = fs.readFileSync(file, 'utf8');
+    // Convert "ADD_RESULTS({...});" to a normal JSON.
+    content = content.replace(/^[A-Z_]*\(/, '');
+    content = content.replace(/\);$/, '');
+    this.results = JSON.parse(content);
+  }
+
+  get testRootDir() {
+    if (this._testRootDir)
+      return this._testRootDir;
+
+    // Try the directory in results JSON.
+    // It may not exist if the JSON is produced in other machines.
+    this._testRootDir = this.results.layout_tests_dir;
+    if (fs.existsSync(this._testRootDir)) {
+      log(`Test root directory: ${this._testRootDir}`);
+      return this._testRootDir;
+    }
+
+    this._testRootDir = TestExpectations.findTestRootDir();
+    if (this._testRootDir) {
+      log(`Test root directory: ${this._testRootDir}`);
+      return this._testRootDir;
+    }
+
+    throw new Error('Test root directory not found');
+  }
+
+  result(testPath) {
+    let result = this.results.tests;
+    //for (let key in result)
+    //  log(key);
+    for (let name of testPath.split(/\//)) {
+      result = result[name];
+      if (!result) {
+        //log(`${name} not found from ${testPath}`);
+        return null;
+      }
+      //log(`${name} found from ${testPath}`);
+    }
+    if (!result.actual) {
+      // Skip entry for a directory.
+      log(`Skipping ${testPath} without actual`, result);
+      return null;
+    }
+    //log(`${testPath}: ${result.actual}`);
+    return result;
+  }
+
+  updateExpectations(expectations) {
+    let changeCount = 0;
+    expectations.forAll(test => {
+      let result = this.result(test.path);
+      if (result) {
+        if (test.updateExpectations(result))
+          changeCount++;
+      }
+      return test;
+    });
+
+    log(`Checking new failures:`);
+    let addCount = this.addMissingExpectations(expectations.lines, this.results.tests);
+
+    log(`${changeCount} lines changed, ${addCount} lines added to ${expectations.path}.`);
+    return changeCount + addCount;
+  }
+
+  addMissingExpectations(output, result, testPath) {
+    //log(`addMissingExpectations(${result}, ${testPath})`);
+    if ('actual' in result) {
+      if (!result.is_unexpected)
+        return 0;
+      let actual = result.actual;
+      if (actual == 'PASS')
+        return 0;
+      let test = new TestExpectation(options.bug, testPath, []);
+      if (!test.addActual(actual))
+        return 0;
+      output.push(test);
+      return 1;
+    }
+    let addCount = 0;
+    for (let dir in result) {
+      addCount += this.addMissingExpectations(output, result[dir], testPath ? testPath + '/' + dir : dir);
+    }
+    return addCount;
+  }
+
+  static get defaultPath() {
+    const outDir = process.env.CHROMIUM_OUTPUT_DIR;
+    return path.resolve(outDir, 'layout-test-results', 'full_results.json');
+  }
+}
+
+function requireOrNull(name) {
+  try {
+    return require(name);
+  } catch (e) {
+    return null;
+  }
+}
+
+let log = options.verbose ? console.log.bind(console) : () => {};
+if (options.bug && options.bug.match(/^\d/))
+  options.bug = 'crbug.com/' + options.bug;
+let expectations = options.file ? new TestExpectations(options.file) : null;
+if (!args.length)
+  args.push(null);
+
+let changeCount = 0;
+for (let arg of args) {
+  const results = new TestResults(arg);
+  if (!expectations)
+    expectations = new TestExpectations(path.resolve(results.testRootDir, 'TestExpectations'));
+  changeCount += results.updateExpectations(expectations);
+}
+
+let summary = [`Total changed lines: ${changeCount}`];
+for (let actual in statistics) {
+  summary.push(`  ${actual}: ${statistics[actual]}`);
+}
+if (options.remove) {
+  let missingTests = 0;
+  changeCount += missingTests = expectations.removeIfNotExists();
+  summary.push(`  Removed due to missing tests: ${missingTests}`);
+}
+if (options.pass) {
+  options.pass = options.pass == 'a' ? args.length : parseInt(options.pass);
+  let removedCount = 0;
+  changeCount += removedCount = expectations.removeConsecutivePass(options.pass);
+  summary.push(`  Removed by ${options.pass} consecutive passes: ${removedCount}`);
+}
+log(summary.join('\n'));
+if (changeCount) {
+  expectations.write();
+}

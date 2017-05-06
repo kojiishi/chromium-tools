@@ -1,0 +1,48 @@
+#!/bin/bash
+#
+# "ng-bot 168" will download the 168 result from the layout_ng bot and update
+# the expectation file.
+#
+# You should be in the "third_party/WebKit" directory, or set "WEBKIT" variable
+# to the directory.
+#
+MY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RESULTS_DIR=~/ng-bot
+EXPECTATIONS=${WEBKIT-.}/LayoutTests/FlagExpectations/enable-blink-features=LayoutNG
+NAME=full_results.json
+PREFIX=
+args=()
+for arg in "$@"; do
+  if [[ $arg == "-f" ]]; then
+    NAME=failing_results.json
+    PREFIX=f
+    continue
+  fi
+  if [[ $arg == "-a" ]]; then
+    NAME=archived_results.json
+    PREFIX=a
+    continue
+  fi
+  if [[ $arg == "try" ]]; then
+    git cl try -m tryserver.chromium.linux -b linux_layout_tests_layout_ng
+    continue
+  fi
+  if [[ $arg =~ ^- ]]; then
+    args+=($arg)
+    continue
+  fi
+  if [[ $arg =~ ^[0-9]+$ ]]; then
+    URL=https://storage.googleapis.com/chromium-layout-test-archives/linux_layout_tests_layout_ng/$arg/layout-test-results/$NAME
+    arg=$RESULTS_DIR/$PREFIX$arg.json
+    if [ ! -f "$arg" ]; then
+      echo "Downloading $arg..."
+      curl -fo "$arg" --create-dirs "$URL"
+      if [[ ! -f "$arg" ]]; then
+        echo "Download failed, ignored: $arg"
+        continue
+      fi
+    fi
+  fi
+  args+=($arg)
+done
+$MY_DIR/update-expectations -vf "$EXPECTATIONS" -b591099 ${args[@]}
