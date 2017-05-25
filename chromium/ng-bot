@@ -27,10 +27,6 @@ for arg in "$@"; do
     git cl try -m tryserver.chromium.linux -b linux_layout_tests_layout_ng
     continue
   fi
-  if [[ $arg =~ ^- ]]; then
-    args+=($arg)
-    continue
-  fi
   if [[ $arg =~ ^[0-9]+$ ]]; then
     URL=https://storage.googleapis.com/chromium-layout-test-archives/linux_layout_tests_layout_ng/$arg/layout-test-results/$NAME
     arg=$RESULTS_DIR/$PREFIX$arg.json
@@ -45,4 +41,5 @@ for arg in "$@"; do
   fi
   args+=($arg)
 done
+echo update-expectations -f "$EXPECTATIONS" -b591099 ${args[@]}
 $MY_DIR/update-expectations -vf "$EXPECTATIONS" -b591099 ${args[@]}

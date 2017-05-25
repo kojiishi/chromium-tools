@@ -6,13 +6,18 @@ const path = require('path');
 const minimist = requireOrNull('../minimist') || require('minimist');
 const options = minimist(process.argv.slice(2), {
   boolean: ['remove', 'verbose'],
-  string: ['bug', 'file', 'pass'],
+  string: ['bug', 'file', 'ignore', 'pass', 'update'],
   alias: {
     b: 'bug',
     f: 'file',
+    i: 'ignore',
     p: 'pass',
     r: 'remove',
+    u: 'update',
     v: 'verbose',
+  },
+  default: {
+    update: 'Pass,Failure,Crash,Timeout',
   },
   unknown: arg => {
     if (arg.startsWith('-')) {
@@ -20,36 +25,36 @@ const options = minimist(process.argv.slice(2), {
 Usage: ${path.basename(__filename)} [options] [results.json...]
   -b <bug>: The bug number/string for new entries.
   -f <file>: The TestExpectations file path.
+  -i <value,value,...>: Ignore specified values.
   -p <n>: Remove entries if consecutive pass counts >= <n>.
           When <n> is 'a', the number of [results.json] is used.
   -r: Remove entries where test files are missing in the local file system.
+  -u <value,value,...>: Update specified values only.
+  -v: Verbose.
 `);
     }
     return true;
   },
 });
 const args = options._;
-const statistics = {
-  Pass: 0,
-  Failure: 0,
-  Crash: 0,
-  Timeout: 0,
-};
+const statistics = { LinesChanged: 0, LinesAdded: 0 };
 
 class TestExpectation {
-  constructor(bug, testPath, expectations) {
+  constructor(bug, testPath, expectations, conditions) {
     this.bug = bug;
     this.path = testPath;
     this.expectations = expectations;
+    this.conditions = conditions;
     this.consecutivePass = 0;
+    this.consecutiveFailures = 0;
   }
 
   static parse(line) {
     if (line.expectations)
       return line;
-    let match = line.match(/^(\S*)\s+(\S+)\s+\[\s*([^\]]+)]/);
+    let match = line.match(/^(\S*)\s+(\[([^\]]+)]\s+)?(\S+)\s+\[([^\]]+)]/);
     if (match) {
-      return new TestExpectation(match[1], match[2], match[3].trim().split(/\s+/));
+      return new TestExpectation(match[1], match[4], match[5].trim().split(/\s+/), match[3]);
     }
     return null;
   }
@@ -59,7 +64,11 @@ class TestExpectation {
   }
 
   toString() {
-    return `${this.bug ? this.bug : ''} ${this.path} [ ${this.expectations.join(' ')} ]`;
+    let output = [ this.bug ? this.bug : '' ];
+    if (this.conditions)
+      output = output.concat('[', this.conditions.trim(), ']');
+    output = output.concat(this.path, '[', this.expectations, ']');
+    return output.join(' ');
   }
 
   updateExpectations(result) {
@@ -72,7 +81,10 @@ class TestExpectation {
     //log(`${this.path}: ${result.actual}`);
     result.is_unexpected = false;
     this.updateConsecutivePass(result.actual);
-    return this.addActual(result.actual);
+    let addCount = this.addActual(result.actual);
+    if (addCount)
+      statistics.LinesChanged++;
+    return addCount;
   }
 
   addActual(actuals) {
@@ -80,10 +92,10 @@ class TestExpectation {
     actuals = actuals.split(/ +/);
     for (let actual of actuals) {
       actual = TestExpectation.expectFromActual(actual);
-      if (!actual)
+      if (!actual || !(actual in statistics))
         continue;
       if (!this.expectations.includes(actual)) {
-        log(`Adding ${actual} to ${this.path}`);
+        log(`  Adding ${actual} to ${this.path}`);
         this.expectations.push(actual);
         addCount++;
         statistics[actual]++;
@@ -95,10 +107,25 @@ class TestExpectation {
   }
 
   updateConsecutivePass(actual) {
-    if (actual == 'PASS')
+    if (actual == 'PASS') {
       this.consecutivePass++;
-    else
+      this.consecutiveFailures = 0;
+    } else {
       this.consecutivePass = 0;
+      if (actual.includes('PASS'))
+        this.consecutiveFailures = 0;
+      else
+        this.consecutiveFailures++;
+    }
+  }
+
+  remove(expectation) {
+    let removed = this.expectations.filter(e => e != expectations);
+    if (removed.length != this.expectations.length) {
+      this.expectations = removed;
+      return true;
+    }
+    return false;
   }
 
   exists(testRoot) {
@@ -141,23 +168,32 @@ class TestExpectations {
     if (!testRootDir)
       testRootDir = TestExpectations.findTestRootDir(this.path);
     log(`Checking non-existent tests in ${testRootDir}`);
+    statistics.LinesRemoved = statistics.LinesRemoved || 0;
     return this.removeIf(test => {
       if (test.path && !test.exists(testRootDir)) {
-        log(`Removing non-existent test: ${test.path}`);
+        log(`  Removing non-existent test: ${test.path}`);
+        statistics.LinesRemoved++;
         return true;
       }
       return false;
     });
   }
 
-  removeConsecutivePass(minCount) {
-    log(`Checking consecutive pass >= ${minCount}`);
-    return this.removeIf(test => {
+  checkConsecutivePassesAndFailures(minCount) {
+    log(`Checking consecutive passes and failures >= ${minCount}`);
+    statistics.LinesRemoved = statistics.LinesRemoved || 0;
+    statistics.LinesUnflaked = statistics.LinesUnflaked || 0;
+    return this.forAll(test => {
       if (test.consecutivePass >= minCount) {
-        log(`Removing consecutive pass ${test.consecutivePass}: ${test.path}`);
-        return true;
+        log(`  Removing ${test.consecutivePass} consecutive pass: ${test.path}`);
+        statistics.LinesRemoved++;
+        return null;
       }
-      return false;
+      if (test.consecutiveFailures >= minCount && test.remove('Pass')) {
+        log(`  Unflaked after consecutive failures ${test.consecutiveFailures}: ${test.path}`);
+        statistics.LinesUnflaked++;
+      }
+      return test;
     });
   }
 
@@ -249,7 +285,7 @@ class TestResults {
     }
     if (!result.actual) {
       // Skip entry for a directory.
-      log(`Skipping ${testPath} without actual`, result);
+      log(`  Skipping ${testPath} because actual is missing`);
       return null;
     }
     //log(`${testPath}: ${result.actual}`);
@@ -269,7 +305,6 @@ class TestResults {
 
     log(`Checking new failures:`);
     let addCount = this.addMissingExpectations(expectations.lines, this.results.tests);
-
     log(`${changeCount} lines changed, ${addCount} lines added to ${expectations.path}.`);
     return changeCount + addCount;
   }
@@ -286,6 +321,7 @@ class TestResults {
       if (!test.addActual(actual))
         return 0;
       output.push(test);
+      statistics.LinesAdded++;
       return 1;
     }
     let addCount = 0;
@@ -313,31 +349,40 @@ let log = options.verbose ? console.log.bind(console) : () => {};
 if (options.bug && options.bug.match(/^\d/))
   options.bug = 'crbug.com/' + options.bug;
 let expectations = options.file ? new TestExpectations(options.file) : null;
+if (options.update) {
+  for (let value of options.update.split(/,/))
+    statistics[value] = 0;
+}
+if (options.ignore) {
+  for (let value of options.ignore.split(/,/))
+    delete statistics[value];
+}
+log(`Checking test results for ${Object.keys(statistics).join(', ')}`);
 if (!args.length)
   args.push(null);
 
-let changeCount = 0;
 for (let arg of args) {
   const results = new TestResults(arg);
   if (!expectations)
     expectations = new TestExpectations(path.resolve(results.testRootDir, 'TestExpectations'));
-  changeCount += results.updateExpectations(expectations);
+  results.updateExpectations(expectations);
 }
 
-let summary = [`Total changed lines: ${changeCount}`];
-for (let actual in statistics) {
-  summary.push(`  ${actual}: ${statistics[actual]}`);
-}
+let summary = ['Update summary:'];
 if (options.remove) {
-  let missingTests = 0;
-  changeCount += missingTests = expectations.removeIfNotExists();
+  let missingTests = expectations.removeIfNotExists();
   summary.push(`  Removed due to missing tests: ${missingTests}`);
 }
 if (options.pass) {
   options.pass = options.pass == 'a' ? args.length : parseInt(options.pass);
-  let removedCount = 0;
-  changeCount += removedCount = expectations.removeConsecutivePass(options.pass);
-  summary.push(`  Removed by ${options.pass} consecutive passes: ${removedCount}`);
+  expectations.checkConsecutivePassesAndFailures(options.pass);
+}
+
+let changeCount = 0;
+for (let key in statistics) {
+  let value = statistics[key];
+  changeCount += value;
+  summary.push(`  ${key}: ${value}`);
 }
 log(summary.join('\n'));
 if (changeCount) {
