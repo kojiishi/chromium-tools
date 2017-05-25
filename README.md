@@ -1,4 +1,6 @@
-# tools
+# chromium-tools
+
+Tools for Chromium development.
 
 ## Install
 
