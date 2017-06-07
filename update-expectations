@@ -4,7 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-const minimist = requireOrNull('../minimist') || require('minimist');
+const minimist = require('minimist');
 const options = minimist(process.argv.slice(2), {
   boolean: ['remove', 'sort', 'verbose'],
   string: ['bug', 'file', 'ignore', 'pass', 'update'],
@@ -31,6 +31,7 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   -p <n>: Remove entries if consecutive pass counts >= <n>.
           When <n> is 'a', the number of [results.json] is used.
   -r: Remove entries where test files are missing in the local file system.
+  -s: Sort the output. Effective only when there are changes.
   -u <value,value,...>: Update specified values only.
   -v: Verbose.
 `);
@@ -373,14 +374,6 @@ class TestResults {
   }
 }
 
-function requireOrNull(name) {
-  try {
-    return require(name);
-  } catch (e) {
-    return null;
-  }
-}
-
 let log = options.verbose ? console.log.bind(console) : () => {};
 if (options.bug && options.bug.match(/^\d/))
   options.bug = 'crbug.com/' + options.bug;
@@ -393,7 +386,7 @@ if (options.ignore) {
   for (let value of options.ignore.split(/,/))
     delete statistics[value];
 }
-log(`Checking test results for ${Object.keys(statistics).join(', ')}`);
+log(`Checking test results for: ${Object.keys(statistics).filter(k => !k.startsWith('Line')).join(', ')}`);
 if (!args.length)
   args.push(null);
 
