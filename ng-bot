@@ -42,4 +42,4 @@ for arg in "$@"; do
   args+=($arg)
 done
 echo update-expectations -f "$EXPECTATIONS" -b591099 ${args[@]}
-$MY_DIR/update-expectations -vf "$EXPECTATIONS" -b591099 ${args[@]}
+$MY_DIR/update-expectations -svf "$EXPECTATIONS" -b591099 ${args[@]}

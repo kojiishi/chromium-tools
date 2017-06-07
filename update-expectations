@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 'use strict';
+const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
 const minimist = requireOrNull('../minimist') || require('minimist');
 const options = minimist(process.argv.slice(2), {
-  boolean: ['remove', 'verbose'],
+  boolean: ['remove', 'sort', 'verbose'],
   string: ['bug', 'file', 'ignore', 'pass', 'update'],
   alias: {
     b: 'bug',
@@ -13,6 +14,7 @@ const options = minimist(process.argv.slice(2), {
     i: 'ignore',
     p: 'pass',
     r: 'remove',
+    s: 'sort',
     u: 'update',
     v: 'verbose',
   },
@@ -57,6 +59,10 @@ class TestExpectation {
       return new TestExpectation(match[1], match[4], match[5].trim().split(/\s+/), match[3]);
     }
     return null;
+  }
+
+  static isTestExpectation(obj) {
+    return obj instanceof TestExpectation;
   }
 
   get filePath() {
@@ -224,6 +230,36 @@ class TestExpectations {
     this.lines = output;
   }
 
+  sort() {
+    let input = this.lines;
+    let output = [];
+    let comparer = (a, b) => {
+      assert.notEqual(a.path, b.path);
+      return a.path < b.path ? -1 : 1;
+    };
+    while (input.length) {
+      let i = 0;
+      for (; i < input.length; i++)
+        if (TestExpectation.isTestExpectation(input[i]))
+          break;
+      if (i) {
+        output = output.concat(input.slice(0, i));
+        input = input.slice(i);
+      }
+      i = 0;
+      for (; i < input.length; i++)
+        if (!TestExpectation.isTestExpectation(input[i]))
+          break;
+      if (i) {
+        let tests = input.slice(0, i);
+        tests.sort(comparer);
+        output = output.concat(tests);
+        input = input.slice(i);
+      }
+    }
+    this.lines = output;
+  }
+
   static findTestRootDir(dir) {
     // Traverse ancestor directories to find the test root.
     for (dir = dir || '.';;) {
@@ -386,5 +422,7 @@ for (let key in statistics) {
 }
 log(summary.join('\n'));
 if (changeCount) {
+  if (options.sort)
+    expectations.sort();
   expectations.write();
 }
