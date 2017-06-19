@@ -6,13 +6,14 @@ const path = require('path');
 
 const minimist = require('minimist');
 const options = minimist(process.argv.slice(2), {
-  boolean: ['remove', 'sort', 'verbose'],
-  string: ['bug', 'file', 'ignore', 'pass', 'update'],
+  boolean: ['deflake', 'deflake-all', 'remove', 'sort', 'verbose'],
+  string: ['bug', 'file', 'ignore', 'update'],
   alias: {
     b: 'bug',
+    d: 'deflake',
+    D: 'deflake-all',
     f: 'file',
     i: 'ignore',
-    p: 'pass',
     r: 'remove',
     s: 'sort',
     u: 'update',
@@ -26,10 +27,10 @@ const options = minimist(process.argv.slice(2), {
       throw new Error(`Unknown option ${arg}
 Usage: ${path.basename(__filename)} [options] [results.json...]
   -b <bug>: The bug number/string for new entries.
+  -d: De-flake if all results are pass.
+  -D: De-flake if all results are consistent.
   -f <file>: The TestExpectations file path.
   -i <value,value,...>: Ignore specified values.
-  -p <n>: Remove entries if consecutive pass counts >= <n>.
-          When <n> is 'a', the number of [results.json] is used.
   -r: Remove entries where test files are missing in the local file system.
   -s: Sort the output. Effective only when there are changes.
   -u <value,value,...>: Update specified values only.
@@ -48,8 +49,7 @@ class TestExpectation {
     this.path = testPath;
     this.expectations = expectations;
     this.conditions = conditions;
-    this.consecutivePass = 0;
-    this.consecutiveFailures = 0;
+    this.confirmedExpectations = {};
   }
 
   static parse(line) {
@@ -87,25 +87,36 @@ class TestExpectation {
     }
     //log(`${this.path}: ${result.actual}`);
     result.is_unexpected = false;
-    this.updateConsecutivePass(result.actual);
-    let addCount = this.addActual(result.actual);
+    let addCount = this.updateFromActual(result.actual);
     if (addCount)
       statistics.LinesChanged++;
     return addCount;
   }
 
-  addActual(actuals) {
+  updateFromActual(actuals) {
     let addCount = 0;
     actuals = actuals.split(/ +/);
     for (let actual of actuals) {
-      actual = TestExpectation.expectFromActual(actual);
-      if (!actual || !(actual in statistics))
-        continue;
-      if (!this.expectations.includes(actual)) {
-        log(`  Adding ${actual} to ${this.path}`);
-        this.expectations.push(actual);
-        addCount++;
-        statistics[actual]++;
+      switch (actual) {
+        case 'PASS':
+          addCount += this.addExpect('Pass');
+          break;
+        case 'IMAGE':
+        case 'TEXT':
+        case 'IMAGE+TEXT':
+          addCount += this.addExpect('Failure');
+          break;
+        case 'CRASH':
+          addCount += this.addExpect('Crash');
+          break;
+        case 'TIMEOUT':
+          addCount += this.addExpect('Timeout');
+          break;
+        case 'SKIP':
+        case 'MISSING':
+          break;
+        default:
+          throw new Error(`Unknown actual ${actual}`);
       }
     }
     if (addCount)
@@ -113,23 +124,28 @@ class TestExpectation {
     return addCount;
   }
 
-  updateConsecutivePass(actual) {
-    if (actual == 'PASS') {
-      this.consecutivePass++;
-      this.consecutiveFailures = 0;
-    } else {
-      this.consecutivePass = 0;
-      if (actual.includes('PASS'))
-        this.consecutiveFailures = 0;
-      else
-        this.consecutiveFailures++;
-    }
+  addExpect(expect) {
+    if (!expect)
+      return 0;
+    this.confirmedExpectations[expect] = true;
+    if (!(expect in statistics) || this.expectations.includes(expect))
+      return 0;
+    log(`  Adding ${expect} to ${this.path}`);
+    this.expectations.push(expect);
+    statistics[expect]++;
+    return 1;
   }
 
-  remove(expectation) {
-    let removed = this.expectations.filter(e => e != expectations);
-    if (removed.length != this.expectations.length) {
-      this.expectations = removed;
+  isAllPass() {
+    return this.confirmedExpectations['Pass'] && Object.keys(this.confirmedExpectations).length == 1;
+  }
+
+  deflake() {
+    if (!Object.keys(this.confirmedExpectations).length)
+      return false;
+    let deflaked = this.expectations.filter(e => e in this.confirmedExpectations);
+    if (deflaked.length != this.expectations.length) {
+      this.expectations = deflaked;
       return true;
     }
     return false;
@@ -137,25 +153,6 @@ class TestExpectation {
 
   exists(testRoot) {
     return fs.existsSync(path.resolve(testRoot, this.filePath));
-  }
-
-  static expectFromActual(actual) {
-    switch (actual) {
-      case 'PASS':
-        return 'Pass';
-      case 'IMAGE':
-      case 'TEXT':
-      case 'IMAGE+TEXT':
-        return 'Failure';
-      case 'CRASH':
-        return 'Crash';
-      case 'TIMEOUT':
-        return 'Timeout';
-      case 'SKIP':
-      case 'MISSING':
-        return null;
-    }
-    throw new Error(`Unknown actual ${actual}`);
   }
 }
 
@@ -186,19 +183,22 @@ class TestExpectations {
     });
   }
 
-  checkConsecutivePassesAndFailures(minCount) {
-    log(`Checking consecutive passes and failures >= ${minCount}`);
+  deflake(deflakeAll) {
+    log(`De-flaking ${deflakeAll ? 'all results' : 'passes'}`);
     statistics.LinesRemoved = statistics.LinesRemoved || 0;
-    statistics.LinesUnflaked = statistics.LinesUnflaked || 0;
+    statistics.LinesDeflaked = statistics.LinesDeflaked || 0;
     return this.forAll(test => {
-      if (test.consecutivePass >= minCount) {
-        log(`  Removing ${test.consecutivePass} consecutive pass: ${test.path}`);
+      if (test.isAllPass()) {
+        log(`  Removing all passes: ${test.path}`);
         statistics.LinesRemoved++;
         return null;
       }
-      if (test.consecutiveFailures >= minCount && test.remove('Pass')) {
-        log(`  Unflaked after consecutive failures ${test.consecutiveFailures}: ${test.path}`);
-        statistics.LinesUnflaked++;
+      if (!deflakeAll)
+        return test;
+      let beforeDeflake = test.expectations;
+      if (test.deflake()) {
+        log(`  Deflaking from ${beforeDeflake} to ${test.expectations}: ${test.path}`);
+        statistics.LinesDeflaked++;
       }
       return test;
     });
@@ -348,24 +348,25 @@ class TestResults {
 
   addMissingExpectations(output, result, testPath) {
     //log(`addMissingExpectations(${result}, ${testPath})`);
-    if ('actual' in result) {
-      if (!result.is_unexpected)
-        return 0;
-      let actual = result.actual;
-      if (actual == 'PASS')
-        return 0;
-      let test = new TestExpectation(options.bug, testPath, []);
-      if (!test.addActual(actual))
-        return 0;
-      output.push(test);
-      statistics.LinesAdded++;
-      return 1;
+    if (!('actual' in result)) {
+      // If this is a directory, check children.
+      let addCount = 0;
+      for (let dir in result) {
+        addCount += this.addMissingExpectations(output, result[dir], testPath ? testPath + '/' + dir : dir);
+      }
+      return addCount;
     }
-    let addCount = 0;
-    for (let dir in result) {
-      addCount += this.addMissingExpectations(output, result[dir], testPath ? testPath + '/' + dir : dir);
-    }
-    return addCount;
+    if (!result.is_unexpected)
+      return 0;
+    let actual = result.actual;
+    if (actual == 'PASS')
+      return 0;
+    let test = new TestExpectation(options.bug, testPath, []);
+    if (!test.updateFromActual(actual))
+      return 0;
+    output.push(test);
+    statistics.LinesAdded++;
+    return 1;
   }
 
   static get defaultPath() {
@@ -402,9 +403,8 @@ if (options.remove) {
   let missingTests = expectations.removeIfNotExists();
   summary.push(`  Removed due to missing tests: ${missingTests}`);
 }
-if (options.pass) {
-  options.pass = options.pass == 'a' ? args.length : parseInt(options.pass);
-  expectations.checkConsecutivePassesAndFailures(options.pass);
+if (options.deflake || options['deflake-all']) {
+  expectations.deflake(options['deflake-all']);
 }
 
 let changeCount = 0;
