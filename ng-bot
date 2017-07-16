@@ -18,22 +18,7 @@
 #    ```
 # 3. Review the CL and land it.
 #
-# # Remove fixed tests (optional)
-#
-# The maintenane above keeps adding expectations. Once failed, further passes
-# are handled as [ Failure Pass ]; i.e., flaky.
-#
-# 1. Downlaod recent successes from bots. If you run regular maintenance, they
-#    should be already downloaded in ~/ng-bot/.
-# 2. Run following commands:
-#    ```bash
-#    $ ng-bot -u= -d ~/ng-bot/*.json
-#    $ git ci -a
-#    $ ng-bot upload
-#    ```
-# 3. Review the CL and land it.
-#
-# # If bot test results page say "Tests exit early"
+# ## If bot test results page say "Tests exit early"
 #
 # Bots exit at certain number of crashes or timeouts. See crbug.com/714203
 # When this occurs, downloading results from bots is time consuming. You get
@@ -46,6 +31,24 @@
 # 2. Run following commands:
 #    ```bash
 #    $ ng-bot
+#    $ git ci -a
+#    $ ng-bot upload
+#    ```
+# 3. Review the CL and land it.
+#
+# # Remove fixed tests (optional maintenance)
+#
+# Since many tests are flaky at this point, the script handles unexpected passes
+# as flaky, not as fixed; i.e., it adds [ Failure Pass ] rather than remove.
+#
+# The following maintenance detects certain number of consecutive passes and
+# remove them from expectations.
+#
+# 1. Downlaod recent successes from bots. If you run regular maintenance, they
+#    should be already downloaded in ~/ng-bot/.
+# 2. Run following commands:
+#    ```bash
+#    $ ng-bot -u= -d ~/ng-bot/*.json
 #    $ git ci -a
 #    $ ng-bot upload
 #    ```
