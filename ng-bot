@@ -6,6 +6,51 @@
 # You should be in the "third_party/WebKit" directory, or set "WEBKIT" variable
 # to the directory.
 #
+# # Regular maintenance
+#
+# 1. Find recent green bot results at:
+#    https://luci-milo.appspot.com/buildbot/tryserver.chromium.linux/linux_layout_tests_layout_ng/
+# 2. Let's say build #125 and 127 are green. Run following commands:
+#    ```bash
+#    $ ng-bot 125 127
+#    $ git commit -a -m "!*"
+#    $ ng-bot upload
+#    ```
+# 3. Review the CL and land it.
+#
+# # Remove fixed tests (optional)
+#
+# The maintenane above keeps adding expectations. Once failed, further passes
+# are handled as [ Failure Pass ]; i.e., flaky.
+#
+# 1. Downlaod recent successes from bots. If you run regular maintenance, they
+#    should be already downloaded in ~/ng-bot/.
+# 2. Run following commands:
+#    ```bash
+#    $ ng-bot -u= -d ~/ng-bot/*.json
+#    $ git ci -a
+#    $ ng-bot upload
+#    ```
+# 3. Review the CL and land it.
+#
+# # If bot test results page say "Tests exit early"
+#
+# Bots exit at certain number of crashes or timeouts. See crbug.com/714203
+# When this occurs, downloading results from bots is time consuming. You get
+# only first 100 failures or so. After you ran a regular maintenance, you'll
+# get next 100.
+#
+# In such case, you can run tests locally, and update expectations from it.
+#
+# 1. Run tests locally.
+# 2. Run following commands:
+#    ```bash
+#    $ ng-bot
+#    $ git ci -a
+#    $ ng-bot upload
+#    ```
+# 3. Review the CL and land it.
+#
 MY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESULTS_DIR=~/ng-bot
 EXPECTATIONS=${WEBKIT-.}/LayoutTests/FlagExpectations/enable-blink-features=LayoutNG
@@ -25,7 +70,28 @@ for arg in "$@"; do
   fi
   if [[ $arg == "try" ]]; then
     git cl try -m tryserver.chromium.linux -b linux_layout_tests_layout_ng
-    continue
+    exit
+  fi
+  if [[ $arg == up* ]]; then
+    MESSAGE_FILE=$(mktemp --suffix=-cl-message)
+    cat <<EOF >$MESSAGE_FILE
+[LayoutNG] Update FlagExpectations for LayoutNG
+
+Following bot results are included.
+EOF
+    git log --format=%B -n 1 >>$MESSAGE_FILE
+    cat <<EOF >>$MESSAGE_FILE
+
+0 lines were removed by consecutive passes since 0.
+
+TBR=eae@chromium.org
+NOTRY=true
+BUG: 591099
+EOF
+    git cl upload --message-file=$MESSAGE_FILE
+    rm $MESSAGE_FILE
+    git cl try -m tryserver.chromium.linux -b linux_layout_tests_layout_ng
+    exit
   fi
   if [[ $arg =~ ^[0-9]+$ ]]; then
     URL=https://storage.googleapis.com/chromium-layout-test-archives/linux_layout_tests_layout_ng/$arg/layout-test-results/$NAME
