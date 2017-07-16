@@ -31,7 +31,7 @@
 # 2. Run following commands:
 #    ```bash
 #    $ ng-bot
-#    $ git ci -a
+#    $ git commit -a
 #    $ ng-bot upload
 #    ```
 # 3. Review the CL and land it.
@@ -44,12 +44,12 @@
 # The following maintenance detects certain number of consecutive passes and
 # remove them from expectations.
 #
-# 1. Downlaod recent successes from bots. If you run regular maintenance, they
-#    should be already downloaded in ~/ng-bot/.
+# 1. Download recent success results from bots. If you run regular maintenance,
+#    they should be already downloaded in ~/ng-bot/.
 # 2. Run following commands:
 #    ```bash
 #    $ ng-bot -u= -d ~/ng-bot/*.json
-#    $ git ci -a
+#    $ git commit -a
 #    $ ng-bot upload
 #    ```
 # 3. Review the CL and land it.
@@ -76,14 +76,13 @@ for arg in "$@"; do
     exit
   fi
   if [[ $arg == up* ]]; then
+    COMMIT_MESSAGE=$(git log --format=%B -n 1)
     MESSAGE_FILE=$(mktemp --suffix=-cl-message)
-    cat <<EOF >$MESSAGE_FILE
+    cat <<EOF >>$MESSAGE_FILE
 [LayoutNG] Update FlagExpectations for LayoutNG
 
 Following bot results are included.
-EOF
-    git log --format=%B -n 1 >>$MESSAGE_FILE
-    cat <<EOF >>$MESSAGE_FILE
+$COMMIT_MESSAGE
 
 0 lines were removed by consecutive passes since 0.
 
