@@ -88,7 +88,7 @@ $COMMIT_MESSAGE
 
 TBR=eae@chromium.org
 NOTRY=true
-BUG: 591099
+Bug: 591099
 EOF
     git cl upload --message-file=$MESSAGE_FILE
     rm $MESSAGE_FILE
