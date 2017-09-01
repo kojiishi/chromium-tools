@@ -13,7 +13,6 @@
 # 2. Let's say build #125 and 127 are green. Run following commands:
 #    ```bash
 #    $ ng-bot 125 127
-#    $ git commit -a -m "!*"
 #    $ ng-bot upload
 #    ```
 # 3. Review the CL and land it.
@@ -49,7 +48,6 @@
 # 2. Run following commands:
 #    ```bash
 #    $ ng-bot -u= -d ~/ng-bot/*.json
-#    $ git commit -a
 #    $ ng-bot upload
 #    ```
 # 3. Review the CL and land it.
@@ -60,6 +58,8 @@ EXPECTATIONS=${WEBKIT-.}/LayoutTests/FlagExpectations/enable-blink-features=Layo
 NAME=full_results.json
 PREFIX=
 args=()
+commit=()
+
 for arg in "$@"; do
   if [[ $arg == "-f" ]]; then
     NAME=failing_results.json
@@ -76,7 +76,7 @@ for arg in "$@"; do
     exit
   fi
   if [[ $arg == up* ]]; then
-    COMMIT_MESSAGE=$(git log --format=%B -n 1)
+    COMMIT_MESSAGE=$(git log --format=%B origin..HEAD)
     MESSAGE_FILE=$(mktemp --suffix=-cl-message)
     cat <<EOF >>$MESSAGE_FILE
 [LayoutNG] Update FlagExpectations for LayoutNG
@@ -97,17 +97,34 @@ EOF
   fi
   if [[ $arg =~ ^[0-9]+$ ]]; then
     URL=https://storage.googleapis.com/chromium-layout-test-archives/linux_layout_tests_layout_ng/$arg/layout-test-results/$NAME
-    arg=$RESULTS_DIR/$PREFIX$arg.json
-    if [ ! -f "$arg" ]; then
-      echo "Downloading $arg..."
-      curl -fo "$arg" --create-dirs "$URL"
-      if [[ ! -f "$arg" ]]; then
-        echo "Download failed, ignored: $arg"
+    path=$RESULTS_DIR/$PREFIX$arg.json
+    if [ ! -f "$path" ]; then
+      echo "Downloading $path..."
+      curl -fo "$path" --create-dirs "$URL"
+      if [[ ! -f "$path" ]]; then
+        echo "Download failed, ignored: $path"
         continue
       fi
     fi
+    commit+=($arg)
+    args+=($path)
+    continue
+  fi
+  if [[ -f "$arg" ]]; then
+    if [[ $arg =~ ([0-9]+)\.json ]]; then
+      commit+=(${BASH_REMATCH[1]})
+    else
+      commit+=($arg)
+    fi
+    args+=($arg)
+    continue
   fi
   args+=($arg)
 done
-echo update-expectations -f "$EXPECTATIONS" -b591099 ${args[@]}
-$MY_DIR/update-expectations -svf "$EXPECTATIONS" -b591099 ${args[@]}
+
+(set -x; $MY_DIR/update-expectations -svf "$EXPECTATIONS" -b591099 ${args[@]})
+
+if [[ ${#commit[@]} -gt 0 ]]; then
+  msg="$(echo "${commit[*]}")"
+  (set -x; git add "$EXPECTATIONS"; git commit -m "$msg")
+fi
