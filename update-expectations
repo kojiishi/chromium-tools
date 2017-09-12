@@ -136,19 +136,24 @@ class TestExpectation {
     return 1;
   }
 
-  isAllPass() {
-    return this.confirmedExpectations['Pass'] && Object.keys(this.confirmedExpectations).length == 1;
+  deflakeShouldRemove() {
+    function isPassOnly(expectations) {
+      return expectations['Pass'] && Object.keys(expectations).length == 1;
+    }
+    // Don't remove '[ Pass ]', it's to override expectations in different file.
+    if (isPassOnly(this.expectations))
+      return false;
+    return isPassOnly(this.confirmedExpectations);
   }
 
   deflake() {
     if (!Object.keys(this.confirmedExpectations).length)
       return false;
     let deflaked = this.expectations.filter(e => e in this.confirmedExpectations);
-    if (deflaked.length != this.expectations.length) {
-      this.expectations = deflaked;
-      return true;
-    }
-    return false;
+    if (deflaked.length == this.expectations.length)
+      return false;
+    this.expectations = deflaked;
+    return true;
   }
 
   exists(testRoot) {
@@ -188,7 +193,7 @@ class TestExpectations {
     statistics.LinesRemoved = statistics.LinesRemoved || 0;
     statistics.LinesDeflaked = statistics.LinesDeflaked || 0;
     this.forAll(test => {
-      if (test.isAllPass()) {
+      if (test.deflakeShouldRemove()) {
         log(`  Removing all passes: ${test.path}`);
         statistics.LinesRemoved++;
         return null;
