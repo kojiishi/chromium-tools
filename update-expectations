@@ -137,13 +137,13 @@ class TestExpectation {
   }
 
   deflakeShouldRemove() {
-    function isPassOnly(expectations) {
-      return expectations['Pass'] && Object.keys(expectations).length == 1;
+    if (this.confirmedExpectations['Pass'] && Object.keys(this.confirmedExpectations).length == 1) {
+      // Don't remove '[ Pass ]', it's to override expectations in different file.
+      if (this.expectations.length == 1 && this.expectations[0] == 'Pass')
+        return false;
+      return true;
     }
-    // Don't remove '[ Pass ]', it's to override expectations in different file.
-    if (isPassOnly(this.expectations))
-      return false;
-    return isPassOnly(this.confirmedExpectations);
+    return false;
   }
 
   deflake() {
@@ -364,8 +364,6 @@ class TestResults {
     if (!result.is_unexpected)
       return 0;
     let actual = result.actual;
-    if (actual == 'PASS')
-      return 0;
     let test = new TestExpectation(options.bug, testPath, []);
     if (!test.updateFromActual(actual))
       return 0;
