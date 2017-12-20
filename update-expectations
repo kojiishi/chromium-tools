@@ -2,12 +2,13 @@
 'use strict';
 const assert = require('assert');
 const fs = require('fs');
+const https = require('https');
 const path = require('path');
 
 const minimist = require('minimist');
 const options = minimist(process.argv.slice(2), {
   boolean: ['deflake', 'deflake-all', 'remove', 'sort', 'verbose'],
-  string: ['bug', 'file', 'ignore', 'update'],
+  string: ['bug', 'file', 'ignore', 'update', 'exclude'],
   alias: {
     b: 'bug',
     d: 'deflake',
@@ -18,6 +19,7 @@ const options = minimist(process.argv.slice(2), {
     s: 'sort',
     u: 'update',
     v: 'verbose',
+    x: 'exclude',
   },
   default: {
     update: 'Pass,Failure,Crash,Timeout',
@@ -32,32 +34,41 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   -f <file>: The TestExpectations file path.
   -i <value,value,...>: Ignore specified values.
   -r: Remove entries where test files are missing in the local file system.
-  -s: Sort the output. Effective only when there are changes.
+  -s: Sort the output.
   -u <value,value,...>: Update specified values only.
   -v: Verbose.
+  -x <string>: Do not udpate tests with the specified string in its path string.
 `);
     }
     return true;
   },
 });
 const args = options._;
+let log = options.verbose ? console.log.bind(console) : () => {};
 const statistics = { LinesChanged: 0, LinesAdded: 0 };
 
 class TestExpectation {
-  constructor(bug, testPath, expectations, conditions) {
+  constructor(bug, testPath, expectations, conditions, trailing) {
     this.bug = bug;
     this.path = testPath;
     this.expectations = expectations;
     this.conditions = conditions;
+    this.trailing = trailing;
     this.confirmedExpectations = {};
+    this.shouldNotUpdate = (options.exclude && testPath.includes(options.exclude)) ||
+                           (this.expectations.length == 1 &&
+                             (this.expectations[0] == 'Skip' ||
+                              this.expectations[0] == 'NeedsRebaseline' ||
+                              this.expectations[0] == 'NeedsManualRebaseline'));
+    ;
   }
 
   static parse(line) {
     if (line.expectations)
       return line;
-    let match = line.match(/^(\S*)\s+(\[([^\]]+)]\s+)?(\S+)\s+\[([^\]]+)]/);
+    let match = line.match(/^(\S*)\s+(\[([^\]]+)]\s+)?(\S+)\s+\[([^\]]+)](.*)/);
     if (match) {
-      return new TestExpectation(match[1], match[4], match[5].trim().split(/\s+/), match[3]);
+      return new TestExpectation(match[1], match[4], match[5].trim().split(/\s+/), match[3], match[6]);
     }
     return null;
   }
@@ -75,17 +86,13 @@ class TestExpectation {
     if (this.conditions)
       output = output.concat('[', this.conditions.trim(), ']');
     output = output.concat(this.path, '[', this.expectations, ']');
-    return output.join(' ');
+    return output.join(' ') + (this.trailing ? this.trailing : '');
   }
 
   updateExpectations(result) {
-    if (this.expectations.length == 1 &&
-        (this.expectations[0] == 'Skip' ||
-         this.expectations[0] == 'NeedsRebaseline' ||
-         this.expectations[0] == 'NeedsManualRebaseline')) {
-      return false;
-    }
     //log(`${this.path}: ${result.actual}`);
+    if (this.shouldNotUpdate)
+      return 0;
     result.is_unexpected = false;
     let addCount = this.updateFromActual(result.actual);
     if (addCount)
@@ -112,8 +119,10 @@ class TestExpectation {
         case 'TIMEOUT':
           addCount += this.addExpect('Timeout');
           break;
-        case 'SKIP':
         case 'MISSING':
+	  addCount += this.addExpect('Skip');
+	  break;
+        case 'SKIP':
           break;
         default:
           throw new Error(`Unknown actual ${actual}`);
@@ -137,6 +146,8 @@ class TestExpectation {
   }
 
   deflakeShouldRemove() {
+    if (this.shouldNotUpdate)
+      return false;
     if (this.confirmedExpectations['Pass'] && Object.keys(this.confirmedExpectations).length == 1) {
       // Don't remove '[ Pass ]', it's to override expectations in different file.
       if (this.expectations.length == 1 && this.expectations[0] == 'Pass')
@@ -147,6 +158,8 @@ class TestExpectation {
   }
 
   deflake() {
+    if (this.shouldNotUpdate)
+      return false;
     if (!Object.keys(this.confirmedExpectations).length)
       return false;
     let deflaked = this.expectations.filter(e => e in this.confirmedExpectations);
@@ -279,17 +292,54 @@ class TestExpectations {
   }
 }
 
+function downloadUrl(url, dest) {
+  log(`Downloading from ${url}`);
+  return new Promise((resolve, reject) => {
+    https.get(url, response => {
+      log(`HTTP Status=${response.statusCode} for ${url}`);
+      if (response.statusCode != 200) {
+	reject(new Error(`HTTP status ${response.statusCode}`));
+	return;
+      }
+      let output = fs.createWriteStream(dest);
+      response.pipe(output);
+      output.on('finish', () => {
+	log(`Download completed to ${dest}.`);
+        output.close(resolve);
+      });
+    }).on('error', err => {
+      fs.unlink(dest);
+      reject(err);
+    });
+  });
+}
+
 class TestResults {
-  constructor(file) {
-    if (!file) {
-      file = TestResults.defaultPath;
+  constructor(results) {
+    this.results = results;
+  }
+
+  static async load(file = TestResults.defaultPath) {
+    // If this is a build#, download from the layout-test-archive.
+    if (/^[0-9]+$/.test(file) && !fs.existsSync(file)) {
+      let build = file;
+      file = path.join(process.env.HOME, 'ng-bot', build + '.json');
+      if (!fs.existsSync(file)) {
+	let url = `https://storage.googleapis.com/chromium-layout-test-archives/linux_layout_tests_layout_ng/${build}/layout-test-results/full_results.json`;
+	await downloadUrl(url, file);
+      }
     }
+
     log(`Loading results from ${file}`);
     let content = fs.readFileSync(file, 'utf8');
     // Convert "ADD_RESULTS({...});" to a normal JSON.
     content = content.replace(/^[A-Z_]*\(/, '');
     content = content.replace(/\);$/, '');
-    this.results = JSON.parse(content);
+    return new TestResults(JSON.parse(content));
+  }
+
+  get regressionCount() {
+    return this.results.num_regressions;
   }
 
   get testRootDir() {
@@ -311,6 +361,12 @@ class TestResults {
     }
 
     throw new Error('Test root directory not found');
+  }
+
+  toString() {
+    if (this.results.builder_name)
+      return `${this.results.build_number}@${this.results.builder_name}`;
+    return `local (${this.results.layout_tests_dir})`;
   }
 
   result(testPath) {
@@ -335,6 +391,7 @@ class TestResults {
   }
 
   updateExpectations(expectations) {
+    log(`Updating expectations from ${this.toString()}`);
     let changeCount = 0;
     expectations.forAll(test => {
       let result = this.result(test.path);
@@ -365,6 +422,8 @@ class TestResults {
       return 0;
     let actual = result.actual;
     let test = new TestExpectation(options.bug, testPath, []);
+    if (test.shouldNotUpdate)
+      return 0;
     if (!test.updateFromActual(actual))
       return 0;
     output.push(test);
@@ -378,47 +437,59 @@ class TestResults {
   }
 }
 
-let log = options.verbose ? console.log.bind(console) : () => {};
-if (options.bug && options.bug.match(/^\d/))
-  options.bug = 'crbug.com/' + options.bug;
-let expectations = options.file ? new TestExpectations(options.file) : null;
-if (options.update) {
-  for (let value of options.update.split(/,/))
-    statistics[value] = 0;
-}
-if (options.ignore) {
-  for (let value of options.ignore.split(/,/))
-    delete statistics[value];
-}
-log(`Checking test results for: ${Object.keys(statistics).filter(k => !k.startsWith('Line')).join(', ')}`);
-if (!args.length)
-  args.push(null);
+async function run() {
+  if (options.bug && options.bug.match(/^\d/))
+    options.bug = 'crbug.com/' + options.bug;
+  let expectations = options.file ? new TestExpectations(options.file) : null;
+  if (options.update) {
+    for (let value of options.update.split(/,/))
+      statistics[value] = 0;
+  }
+  if (options.ignore) {
+    for (let value of options.ignore.split(/,/))
+      delete statistics[value];
+  }
+  log(`Checking test results for: ${Object.keys(statistics).filter(k => !k.startsWith('Line')).join(', ')}`);
+  if (!args.length)
+    args.push(null);
 
-for (let arg of args) {
-  const results = new TestResults(arg);
-  if (!expectations)
-    expectations = new TestExpectations(path.resolve(results.testRootDir, 'TestExpectations'));
-  results.updateExpectations(expectations);
-}
+  let results_list = args.map(arg => TestResults.load(arg));
+  for (let results of results_list) {
+    results = await results;
+    if (!expectations)
+      expectations = new TestExpectations(path.resolve(results.testRootDir, 'TestExpectations'));
+    results.updateExpectations(expectations);
+  }
 
-let summary = ['Update summary:'];
-if (options.remove) {
-  let missingTests = expectations.removeIfNotExists();
-  summary.push(`  Removed due to missing tests: ${missingTests}`);
-}
-if (options.deflake || options['deflake-all']) {
-  expectations.deflake(options['deflake-all']);
-}
+  let summary = ['Update summary:'];
+  if (options.remove) {
+    let missingTests = expectations.removeIfNotExists();
+    summary.push(`  Removed due to missing tests: ${missingTests}`);
+  }
+  if (options.deflake || options['deflake-all']) {
+    expectations.deflake(options['deflake-all']);
+  }
 
-let changeCount = 0;
-for (let key in statistics) {
-  let value = statistics[key];
-  changeCount += value;
-  summary.push(`  ${key}: ${value}`);
-}
-log(summary.join('\n'));
-if (changeCount) {
+  let changeCount = 0;
+  for (let key in statistics) {
+    let value = statistics[key];
+    changeCount += value;
+    summary.push(`  ${key}: ${value}`);
+  }
+  log(summary.join('\n'));
+
   if (options.sort)
     expectations.sort();
   expectations.write();
+}
+
+if (require.main === module) {
+  run().catch(err => {
+    console.log(err);
+    process.exit(1);
+  });
+} else {
+  module.exports = run;
+  module.exports.TestResults = TestResults;
+  module.exports.TestExpectations = TestExpectations;
 }

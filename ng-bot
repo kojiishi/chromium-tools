@@ -55,22 +55,12 @@
 MY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESULTS_DIR=~/ng-bot
 EXPECTATIONS=${WEBKIT-.}/LayoutTests/FlagExpectations/enable-blink-features=LayoutNG
-NAME=full_results.json
-PREFIX=
+BUG=591099
+EXCLUDE=fast/multicol
 args=()
 commit=()
 
 for arg in "$@"; do
-  if [[ $arg == "-f" ]]; then
-    NAME=failing_results.json
-    PREFIX=f
-    continue
-  fi
-  if [[ $arg == "-a" ]]; then
-    NAME=archived_results.json
-    PREFIX=a
-    continue
-  fi
   if [[ $arg == "try" ]]; then
     git cl try -m tryserver.chromium.linux -b linux_layout_tests_layout_ng
     exit
@@ -79,7 +69,7 @@ for arg in "$@"; do
     COMMIT_MESSAGE=$(git log --format=%B origin..HEAD)
     MESSAGE_FILE=$(mktemp --suffix=-cl-message)
     cat <<EOF >>$MESSAGE_FILE
-[LayoutNG] Update FlagExpectations for LayoutNG
+[auto] Update FlagExpectations for LayoutNG
 
 Following bot results are included.
 $COMMIT_MESSAGE
@@ -88,7 +78,7 @@ $COMMIT_MESSAGE
 
 TBR=eae@chromium.org
 NOTRY=true
-Bug: 591099
+Bug: $BUG
 EOF
     git cl upload --message-file=$MESSAGE_FILE
     rm $MESSAGE_FILE
@@ -96,18 +86,8 @@ EOF
     exit
   fi
   if [[ $arg =~ ^[0-9]+$ ]]; then
-    URL=https://storage.googleapis.com/chromium-layout-test-archives/linux_layout_tests_layout_ng/$arg/layout-test-results/$NAME
-    path=$RESULTS_DIR/$PREFIX$arg.json
-    if [ ! -f "$path" ]; then
-      echo "Downloading $path..."
-      curl -fo "$path" --create-dirs "$URL"
-      if [[ ! -f "$path" ]]; then
-        echo "Download failed, ignored: $path"
-        continue
-      fi
-    fi
     commit+=($arg)
-    args+=($path)
+    args+=($arg)
     continue
   fi
   if [[ -f "$arg" ]]; then
@@ -122,7 +102,7 @@ EOF
   args+=($arg)
 done
 
-(set -x; $MY_DIR/update-expectations -svf "$EXPECTATIONS" -b591099 ${args[@]})
+(set -x; $MY_DIR/update-expectations -svf "$EXPECTATIONS" -b "$BUG" "-x=$EXCLUDE" ${args[@]})
 
 if [[ ${#commit[@]} -gt 0 ]]; then
   msg="$(echo "${commit[*]}")"
