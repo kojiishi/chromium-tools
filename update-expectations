@@ -195,7 +195,7 @@ class TestExpectation {
     return addCount;
   }
 
-  rebaseline(result, sourceDir) {
+  rebaseline(result, sourceDir, rebaselineDir) {
     let actuals = result.actual.split(/ +/);
     if (actuals.length !== 1) {
       log(`  Cannot rebaseline due to flaky: ${this.path}`);
@@ -217,7 +217,9 @@ class TestExpectation {
           log(`  Cannot rebaseline '${actuals.join(' ')}: ${this.path}`);
           return false;
       }
-      downloads.push(downloadUrl(sourceDir + name + '-actual' + ext, name + '-expected' + ext));
+      let source = sourceDir + name + '-actual' + ext;
+      let dest = path.join(rebaselineDir, name + '-expected' + ext);
+      downloads.push(downloadUrl(source, dest));
     }
     async_tasks.push(Promise.all(downloads)
       .then(() => this.remove()));
@@ -433,6 +435,12 @@ class TestResults {
     throw new Error('Test root directory not found');
   }
 
+  get rebaselineDir() {
+    let dir = this.testRootDir;
+    dir = path.join(dir, 'flag-specific', 'enable-blink-features=LayoutNG');
+    return dir;
+  }
+
   toString() {
     if (this.results.builder_name)
       return `${this.results.build_number}@${this.results.builder_name}`;
@@ -477,9 +485,9 @@ class TestResults {
       test = expectations.add(testPath);
       if (!test)
         return;
-  }
+    }
     if (test.shouldRebaseline) {
-      test.rebaseline(result, this.sourceDir);
+      test.rebaseline(result, this.sourceDir, this.rebaselineDir);
       return;
     }
     test.updateExpectations(result);
