@@ -17,6 +17,7 @@
   },
   "homepage": "https://github.com/kojiishi/tools#readme",
   "devDependencies": {
+    "fs-extra": "^5.0.0",
     "minimist": "^1.2.0"
   }
 }

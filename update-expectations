@@ -1,51 +1,99 @@
 #!/usr/bin/env node
 'use strict';
 const assert = require('assert');
-const fs = require('fs');
+const fs = require('fs-extra');
 const https = require('https');
 const path = require('path');
 
-const minimist = require('minimist');
-const options = minimist(process.argv.slice(2), {
-  boolean: ['deflake', 'deflake-all', 'remove', 'sort', 'verbose'],
-  string: ['bug', 'file', 'ignore', 'update', 'exclude'],
-  alias: {
-    b: 'bug',
-    d: 'deflake',
-    D: 'deflake-all',
-    f: 'file',
-    i: 'ignore',
-    r: 'remove',
-    s: 'sort',
-    u: 'update',
-    v: 'verbose',
-    x: 'exclude',
-  },
-  default: {
-    update: 'Pass,Failure,Crash,Timeout',
-  },
-  unknown: arg => {
-    if (arg.startsWith('-')) {
-      throw new Error(`Unknown option ${arg}
+let log = () => {};
+const statistics = {
+  LinesChanged: 0,
+  LinesAdded: 0,
+  LinesRemoved: 0,
+};
+let async_tasks = [];
+
+function parseArgs(args) {
+  const minimist = require('minimist');
+  args = args || process.argv.slice(2);
+  const options = minimist(args, {
+    boolean: ['deflake', 'deflake-all', 'remove', 'sort', 'verbose'],
+    string: ['bug', 'file', 'ignore', 'rebaseline', 'update', 'exclude'],
+    alias: {
+      b: 'bug',
+      d: 'deflake',
+      D: 'deflake-all',
+      f: 'file',
+      i: 'ignore',
+      r: 'rebaseline',
+      s: 'sort',
+      u: 'update',
+      v: 'verbose',
+      x: 'exclude',
+    },
+    default: {
+      update: 'Pass,Failure,Crash,Timeout',
+    },
+    unknown: arg => {
+      if (arg.startsWith('-')) {
+        throw new Error(`Unknown option ${arg}
 Usage: ${path.basename(__filename)} [options] [results.json...]
   -b <bug>: The bug number/string for new entries.
   -d: De-flake if all results are pass.
   -D: De-flake if all results are consistent.
   -f <file>: The TestExpectations file path.
   -i <value,value,...>: Ignore specified values.
-  -r: Remove entries where test files are missing in the local file system.
+  -r <test paths>: Rebaseline specified tests instead of adding to expectations.
+  --remove: Remove entries where test files are missing in the local file system.
   -s: Sort the output.
   -u <value,value,...>: Update specified values only.
   -v: Verbose.
   -x <string>: Do not udpate tests with the specified string in its path string.
 `);
-    }
-    return true;
-  },
-});
+      }
+      return true;
+    },
+  });
+  if (options.verbose)
+    log = console.log.bind(console);
+  if (options.rebaseline && options.rebaseline !== '*') {
+    let paths = options.rebaseline.split(/[ \n,]/);
+    options.rebaseline = {};
+    for (let path of paths)
+      options.rebaseline[path] = true;
+  }
+  return options;
+}
+const options = parseArgs();
 const args = options._;
-let log = options.verbose ? console.log.bind(console) : () => {};
-const statistics = { LinesChanged: 0, LinesAdded: 0 };
+
+function downloadUrl(url, dest) {
+  log(`Downloading from ${url}`);
+  return new Promise((resolve, reject) => {
+    let created = null;
+    https.get(url, response => {
+      log(`HTTP Status=${response.statusCode} for ${url}`);
+      if (response.statusCode != 200) {
+        reject(new Error(`HTTP status ${response.statusCode}`));
+        return;
+      }
+      let dirname = path.dirname(dest);
+      if (dirname)
+        fs.ensureDirSync(dirname);
+      let output = fs.createWriteStream(dest);
+      created = dest;
+      response.pipe(output);
+      output.on('finish', () => {
+        log(`Download completed to ${dest}.`);
+        output.close(resolve);
+      });
+    }).on('error', err => {
+      if (created)
+        fs.unlink(created);
+      reject(err);
+    });
+  });
+}
 
 class TestExpectation {
   constructor(bug, testPath, expectations, conditions, trailing) {
@@ -54,6 +102,7 @@ class TestExpectation {
     this.expectations = expectations;
     this.conditions = conditions;
     this.trailing = trailing;
+    this.isRemoved = false;
     this.confirmedExpectations = {};
     this.shouldNotUpdate = (options.exclude && testPath.includes(options.exclude)) ||
                            (this.expectations.length == 1 &&
@@ -81,7 +130,15 @@ class TestExpectation {
     return this.path.replace(/^virtual\/[^/]*\//, '');
   }
 
+  get shouldRebaseline() {
+    if (!options.rebaseline)
+      return false;
+    return this.path in options.rebaseline;
+  }
+
   toString() {
+    if (this.isRemoved)
+      return null;
     let output = [ this.bug ? this.bug : '' ];
     if (this.conditions)
       output = output.concat('[', this.conditions.trim(), ']');
@@ -89,11 +146,16 @@ class TestExpectation {
     return output.join(' ') + (this.trailing ? this.trailing : '');
   }
 
+  remove() {
+    assert(!this.isRemoved);
+    this.isRemoved = true;
+    statistics.LinesRemoved++;
+  }
+
   updateExpectations(result) {
     //log(`${this.path}: ${result.actual}`);
     if (this.shouldNotUpdate)
       return 0;
-    result.is_unexpected = false;
     let addCount = this.updateFromActual(result.actual);
     if (addCount)
       statistics.LinesChanged++;
@@ -120,8 +182,8 @@ class TestExpectation {
           addCount += this.addExpect('Timeout');
           break;
         case 'MISSING':
-	  addCount += this.addExpect('Skip');
-	  break;
+          addCount += this.addExpect('Skip');
+          break;
         case 'SKIP':
           break;
         default:
@@ -131,6 +193,35 @@ class TestExpectation {
     if (addCount)
       this.expectations.sort();
     return addCount;
+  }
+
+  rebaseline(result, sourceDir) {
+    let actuals = result.actual.split(/ +/);
+    if (actuals.length !== 1) {
+      log(`  Cannot rebaseline due to flaky: ${this.path}`);
+      return false;
+    }
+    let name = this.path.replace(/\.[a-z]+$/, '');
+    log(`  Rebaseline ${actuals[0]} for ${this.path}`);
+    let downloads = [];
+    for (let type of actuals[0].split('+')) {
+      let ext = null;
+      switch (type) {
+        case 'IMAGE':
+          ext = '.png';
+          break;
+        case 'TEXT':
+          ext = '.txt';
+          break;
+        default:
+          log(`  Cannot rebaseline '${actuals.join(' ')}: ${this.path}`);
+          return false;
+      }
+      downloads.push(downloadUrl(sourceDir + name + '-actual' + ext, name + '-expected' + ext));
+    }
+    async_tasks.push(Promise.all(downloads)
+      .then(() => this.remove()));
+    return true;
   }
 
   addExpect(expect) {
@@ -145,27 +236,30 @@ class TestExpectation {
     return 1;
   }
 
-  deflakeShouldRemove() {
+  deflake(deflakeAll) {
     if (this.shouldNotUpdate)
       return false;
-    if (this.confirmedExpectations['Pass'] && Object.keys(this.confirmedExpectations).length == 1) {
+    let confirmCount = Object.keys(this.confirmedExpectations).length;
+    if (!confirmCount)
+      return false;
+    if (this.confirmedExpectations['Pass'] && confirmCount == 1) {
       // Don't remove '[ Pass ]', it's to override expectations in different file.
-      if (this.expectations.length == 1 && this.expectations[0] == 'Pass')
-        return false;
+      if (!(this.expectations.length == 1 && this.expectations[0] == 'Pass')) {
+        log(`  Removing all passes: ${this.path}`);
+        this.remove();
+      }
       return true;
     }
-    return false;
-  }
 
-  deflake() {
-    if (this.shouldNotUpdate)
-      return false;
-    if (!Object.keys(this.confirmedExpectations).length)
-      return false;
+    if (!deflakeAll)
+      return;
     let deflaked = this.expectations.filter(e => e in this.confirmedExpectations);
     if (deflaked.length == this.expectations.length)
       return false;
+    log(`  Deflaking from ${this.expectations} to ${deflaked}: ${this.path}`);
     this.expectations = deflaked;
+    statistics.LinesDeflaked = statistics.LinesDeflaked || 0;
+    statistics.LinesDeflaked++;
     return true;
   }
 
@@ -179,18 +273,61 @@ class TestExpectations {
     this.path = file;
     log(`Reading expectations file from ${file}`);
     let inputText = fs.readFileSync(file, 'utf8');
-    this.lines = inputText.trimRight().split(/\r?\n/);
+    this.parse(inputText);
+  }
+
+  parse(inputText) {
+    let lines = inputText.trimRight().split(/\r?\n/)
+    let tests = [];
+    this.testByPath = {};
+    for (let line of lines) {
+      let test = TestExpectation.parse(line);
+      if (!test) {
+        tests.push(line);
+      } else {
+        tests.push(test);
+        this.testByPath[test.path] = test;
+      }
+    }
+    this.lines = tests;
+  }
+
+  add(testPath) {
+    let test = new TestExpectation(options.bug, testPath, []);
+    if (test.shouldNotUpdate)
+      return null;
+    this.lines.push(test);
+    this.testByPath[testPath] = test;
+    statistics.LinesAdded++;
+    return test;
   }
 
   write() {
-    fs.writeFileSync(this.path, this.lines.join('\n') + '\n', 'utf8');
+    let lines = this.lines
+      .filter(test =>
+        !TestExpectation.isTestExpectation(test) ||
+        !test.isRemoved);
+    fs.writeFileSync(this.path, lines.join('\n') + '\n', 'utf8');
+  }
+
+  expectation(testPath) {
+    assert(testPath);
+    return this.testByPath[testPath];
+  }
+
+  deflake(deflakeAll) {
+    log(`De-flaking ${deflakeAll ? 'all results' : 'passes'}`);
+    for (let test of this.lines) {
+      if (!TestExpectation.isTestExpectation(test))
+        continue;
+      test.deflake(deflakeAll);
+    }
   }
 
   removeIfNotExists(testRootDir) {
     if (!testRootDir)
       testRootDir = TestExpectations.findTestRootDir(this.path);
     log(`Checking non-existent tests in ${testRootDir}`);
-    statistics.LinesRemoved = statistics.LinesRemoved || 0;
     return this.removeIf(test => {
       if (test.path && !test.exists(testRootDir)) {
         log(`  Removing non-existent test: ${test.path}`);
@@ -199,54 +336,6 @@ class TestExpectations {
       }
       return false;
     });
-  }
-
-  deflake(deflakeAll) {
-    log(`De-flaking ${deflakeAll ? 'all results' : 'passes'}`);
-    statistics.LinesRemoved = statistics.LinesRemoved || 0;
-    statistics.LinesDeflaked = statistics.LinesDeflaked || 0;
-    this.forAll(test => {
-      if (test.deflakeShouldRemove()) {
-        log(`  Removing all passes: ${test.path}`);
-        statistics.LinesRemoved++;
-        return null;
-      }
-      if (!deflakeAll)
-        return test;
-      let beforeDeflake = test.expectations;
-      if (test.deflake()) {
-        log(`  Deflaking from ${beforeDeflake} to ${test.expectations}: ${test.path}`);
-        statistics.LinesDeflaked++;
-      }
-      return test;
-    });
-  }
-
-  removeIf(condition) {
-    let count = 0;
-    this.forAll(test => {
-      if (condition(test)) {
-        count++;
-        return null;
-      }
-      return test;
-    });
-    return count;
-  }
-
-  forAll(filter) {
-    let output = [];
-    for (let line of this.lines) {
-      let test = TestExpectation.parse(line);
-      if (test) {
-        test = filter(test);
-        if (!test)
-          continue;
-        line = test;
-      }
-      output.push(line);
-    }
-    this.lines = output;
   }
 
   sort() {
@@ -292,41 +381,22 @@ class TestExpectations {
   }
 }
 
-function downloadUrl(url, dest) {
-  log(`Downloading from ${url}`);
-  return new Promise((resolve, reject) => {
-    https.get(url, response => {
-      log(`HTTP Status=${response.statusCode} for ${url}`);
-      if (response.statusCode != 200) {
-	reject(new Error(`HTTP status ${response.statusCode}`));
-	return;
-      }
-      let output = fs.createWriteStream(dest);
-      response.pipe(output);
-      output.on('finish', () => {
-	log(`Download completed to ${dest}.`);
-        output.close(resolve);
-      });
-    }).on('error', err => {
-      fs.unlink(dest);
-      reject(err);
-    });
-  });
-}
-
 class TestResults {
-  constructor(results) {
+  constructor(results, sourcePath) {
     this.results = results;
+    this.sourcePath = sourcePath;
+    this.sourceDir = path.dirname(sourcePath) + '/';
   }
 
   static async load(file = TestResults.defaultPath) {
     // If this is a build#, download from the layout-test-archive.
+    let sourcePath = file;
     if (/^[0-9]+$/.test(file) && !fs.existsSync(file)) {
       let build = file;
+      sourcePath = `https://storage.googleapis.com/chromium-layout-test-archives/linux_layout_tests_layout_ng/${build}/layout-test-results/full_results.json`;
       file = path.join(process.env.HOME, 'ng-bot', build + '.json');
       if (!fs.existsSync(file)) {
-	let url = `https://storage.googleapis.com/chromium-layout-test-archives/linux_layout_tests_layout_ng/${build}/layout-test-results/full_results.json`;
-	await downloadUrl(url, file);
+        await downloadUrl(sourcePath, file);
       }
     }
 
@@ -335,7 +405,7 @@ class TestResults {
     // Convert "ADD_RESULTS({...});" to a normal JSON.
     content = content.replace(/^[A-Z_]*\(/, '');
     content = content.replace(/\);$/, '');
-    return new TestResults(JSON.parse(content));
+    return new TestResults(JSON.parse(content), sourcePath);
   }
 
   get regressionCount() {
@@ -366,69 +436,53 @@ class TestResults {
   toString() {
     if (this.results.builder_name)
       return `${this.results.build_number}@${this.results.builder_name}`;
-    return `local (${this.results.layout_tests_dir})`;
+    return `local (${this.sourcePath})`;
   }
 
   result(testPath) {
     let result = this.results.tests;
-    //for (let key in result)
-    //  log(key);
     for (let name of testPath.split(/\//)) {
       result = result[name];
-      if (!result) {
-        //log(`${name} not found from ${testPath}`);
+      if (!result)
         return null;
-      }
-      //log(`${name} found from ${testPath}`);
     }
     if (!result.actual) {
       // Skip entry for a directory.
       log(`  Skipping ${testPath} because actual is missing`);
       return null;
     }
-    //log(`${testPath}: ${result.actual}`);
     return result;
   }
 
   updateExpectations(expectations) {
     log(`Updating expectations from ${this.toString()}`);
-    let changeCount = 0;
-    expectations.forAll(test => {
-      let result = this.result(test.path);
-      if (result) {
-        if (test.updateExpectations(result))
-          changeCount++;
-      }
-      return test;
-    });
-
-    log(`Checking new failures:`);
-    let addCount = this.addMissingExpectations(expectations.lines, this.results.tests);
-    log(`${changeCount} lines changed, ${addCount} lines added to ${expectations.path}.`);
-    return changeCount + addCount;
+    this.updateExpectationsRecursively(expectations, this.results.tests, '');
   }
 
-  addMissingExpectations(output, result, testPath) {
-    //log(`addMissingExpectations(${result}, ${testPath})`);
-    if (!('actual' in result)) {
-      // If this is a directory, check children.
-      let addCount = 0;
-      for (let dir in result) {
-        addCount += this.addMissingExpectations(output, result[dir], testPath ? testPath + '/' + dir : dir);
+  updateExpectationsRecursively(expectations, result, testPath) {
+    // If this is a directory, traverse children.
+    if (!result.actual) {
+      for (let name in result) {
+        this.updateExpectationsRecursively(expectations, result[name], testPath ? testPath + '/' + name : name);
       }
-      return addCount;
+      return;
     }
+
+    // If this is a test result, update expectations.
+    assert(testPath);
     if (!result.is_unexpected)
-      return 0;
-    let actual = result.actual;
-    let test = new TestExpectation(options.bug, testPath, []);
-    if (test.shouldNotUpdate)
-      return 0;
-    if (!test.updateFromActual(actual))
-      return 0;
-    output.push(test);
-    statistics.LinesAdded++;
-    return 1;
+      return;
+    let test = expectations.expectation(testPath);
+    if (!test) {
+      test = expectations.add(testPath);
+      if (!test)
+        return;
+  }
+    if (test.shouldRebaseline) {
+      test.rebaseline(result, this.sourceDir);
+      return;
+    }
+    test.updateExpectations(result);
   }
 
   static get defaultPath() {
@@ -468,6 +522,11 @@ async function run() {
   }
   if (options.deflake || options['deflake-all']) {
     expectations.deflake(options['deflake-all']);
+  }
+
+  if (async_tasks) {
+    log('Waiting for all rebaseline tasks to copmlete');
+    await Promise.all(async_tasks);
   }
 
   let changeCount = 0;
