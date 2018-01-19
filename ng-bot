@@ -30,7 +30,7 @@
 # 2. Run following commands:
 #    ```bash
 #    $ ng-bot
-#    $ git commit -a
+#    $ git jobs -a
 #    $ ng-bot upload
 #    ```
 # 3. Review the CL and land it.
@@ -58,9 +58,14 @@ EXPECTATIONS=${WEBKIT-.}/LayoutTests/FlagExpectations/enable-blink-features=Layo
 BUG=591099
 EXCLUDE=fast/multicol
 args=()
-commit=()
+jobs=()
+commit=1
 
 for arg in "$@"; do
+  if [[ $arg == "-n" ]]; then
+    commit=
+    continue
+  fi
   if [[ $arg == "try" ]]; then
     git cl try -m tryserver.chromium.linux -b linux_layout_tests_layout_ng
     exit
@@ -74,7 +79,8 @@ for arg in "$@"; do
 Following bot results are included.
 $COMMIT_MESSAGE
 
-0 lines were removed by consecutive passes since 0.
+0 lines were removed and 0 lines were deflaked by consecutive results
+since 0.
 
 TBR=eae@chromium.org
 NOTRY=true
@@ -86,25 +92,25 @@ EOF
     exit
   fi
   if [[ $arg =~ ^[0-9]+$ ]]; then
-    commit+=($arg)
+    jobs+=($arg)
     args+=($arg)
     continue
   fi
   if [[ -f "$arg" ]]; then
     if [[ $arg =~ ([0-9]+)\.json ]]; then
-      commit+=(${BASH_REMATCH[1]})
+      jobs+=(${BASH_REMATCH[1]})
     else
-      commit+=($arg)
+      jobs+=($arg)
     fi
     args+=($arg)
     continue
   fi
-  args+=($arg)
+  args+=("$arg")
 done
 
-(set -x; $MY_DIR/update-expectations -svf "$EXPECTATIONS" -b "$BUG" "-x=$EXCLUDE" ${args[@]})
+(set -x; $MY_DIR/update-expectations -svf "$EXPECTATIONS" -b "$BUG" "-x=$EXCLUDE" "${args[@]}")
 
-if [[ ${#commit[@]} -gt 0 ]]; then
-  msg="$(echo "${commit[*]}")"
-  (set -x; git add "$EXPECTATIONS"; git commit -m "$msg")
+if [[ ${#jobs[@]} -gt 0 ]] && [[ "$commit" -eq "1" ]]; then
+  msg="$(echo "${jobs[*]}")"
+  (set -x; git commit -m "$msg")
 fi

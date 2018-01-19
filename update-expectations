@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 const assert = require('assert');
+const child_process = require('child_process');
 const fs = require('fs-extra');
 const https = require('https');
 const path = require('path');
@@ -44,11 +45,13 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   -f <file>: The TestExpectations file path.
   -i <value,value,...>: Ignore specified values.
   -r <test paths>: Rebaseline specified tests instead of adding to expectations.
+     Test paths is space or newline delimited string.
+     When it's '-', it's read from stdin.
   --remove: Remove entries where test files are missing in the local file system.
   -s: Sort the output.
   -u <value,value,...>: Update specified values only.
   -v: Verbose.
-  -x <string>: Do not udpate tests with the specified string in its path string.
+  -x <string>: Do not update tests with the specified string in its path string.
 `);
       }
       return true;
@@ -56,12 +59,27 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   });
   if (options.verbose)
     log = console.log.bind(console);
-  if (options.rebaseline && options.rebaseline !== '*') {
-    let paths = options.rebaseline.split(/[ \n,]/);
-    options.rebaseline = {};
-    for (let path of paths)
-      options.rebaseline[path] = true;
-  }
+  log.files = [];
+  log.warnings = [];
+  log.warn = msg => {
+    log(msg);
+    log.warnings.push(msg);
+  };
+  options.shouldUpdate = (exclude => {
+    if (!exclude)
+      return () => true;
+    return testPath => !testPath.includes(exclude);
+  })(options.exclude);
+  options.shouldRebaseline = (arg => {
+    if (!arg)
+      return () => false;
+    if (arg === '-')
+      arg = fs.readFileSync('/dev/stdin').toString();
+    let byPath = {};
+    for (let path of arg.split(/[ \n]/).filter(p => p))
+      byPath[path] = true;
+    return testPath => testPath in byPath;
+  })(options.rebaseline);
   return options;
 }
 const options = parseArgs();
@@ -96,7 +114,7 @@ function downloadUrl(url, dest) {
 }
 
 class TestExpectation {
-  constructor(bug, testPath, expectations, conditions, trailing) {
+  constructor(bug, testPath, expectations = [], conditions, trailing) {
     this.bug = bug;
     this.path = testPath;
     this.expectations = expectations;
@@ -104,12 +122,10 @@ class TestExpectation {
     this.trailing = trailing;
     this.isRemoved = false;
     this.confirmedExpectations = {};
-    this.shouldNotUpdate = (options.exclude && testPath.includes(options.exclude)) ||
-                           (this.expectations.length == 1 &&
+    this.shouldNotUpdate = (this.expectations.length == 1 &&
                              (this.expectations[0] == 'Skip' ||
                               this.expectations[0] == 'NeedsRebaseline' ||
                               this.expectations[0] == 'NeedsManualRebaseline'));
-    ;
   }
 
   static parse(line) {
@@ -128,12 +144,6 @@ class TestExpectation {
 
   get filePath() {
     return this.path.replace(/^virtual\/[^/]*\//, '');
-  }
-
-  get shouldRebaseline() {
-    if (!options.rebaseline)
-      return false;
-    return this.path in options.rebaseline;
   }
 
   toString() {
@@ -156,49 +166,55 @@ class TestExpectation {
     //log(`${this.path}: ${result.actual}`);
     if (this.shouldNotUpdate)
       return 0;
-    let addCount = this.updateFromActual(result.actual);
-    if (addCount)
-      statistics.LinesChanged++;
-    return addCount;
-  }
-
-  updateFromActual(actuals) {
-    let addCount = 0;
-    actuals = actuals.split(/ +/);
-    for (let actual of actuals) {
+    let is_unexpected = result.is_unexpected;
+    let expects = result.actual.split(/ +/).map(actual => {
       switch (actual) {
         case 'PASS':
-          addCount += this.addExpect('Pass');
-          break;
+          return 'Pass';
         case 'IMAGE':
         case 'TEXT':
         case 'IMAGE+TEXT':
-          addCount += this.addExpect('Failure');
-          break;
+          return 'Failure';
         case 'CRASH':
-          addCount += this.addExpect('Crash');
-          break;
+          return 'Crash';
         case 'TIMEOUT':
-          addCount += this.addExpect('Timeout');
-          break;
+          return 'Timeout';
         case 'MISSING':
-          addCount += this.addExpect('Skip');
-          break;
+          return 'Skip';
         case 'SKIP':
+          return null;
           break;
         default:
           throw new Error(`Unknown actual ${actual}`);
       }
+    }).filter(expect => expect != null);
+    let addCount = 0;
+    for (let expect of expects) {
+      this.confirmedExpectations[expect] = true;
+      if (is_unexpected && expect in statistics && !this.expectations.includes(expect)) {
+        log(`  Adding ${expect} to ${this.path}`);
+        this.expectations.push(expect);
+        statistics[expect]++;
+        addCount++;
+      }
     }
-    if (addCount)
+    if (addCount) {
       this.expectations.sort();
+      statistics.LinesChanged++;
+    }
     return addCount;
   }
 
-  rebaseline(result, sourceDir, rebaselineDir) {
+  rebaseline(result, results) {
     let actuals = result.actual.split(/ +/);
     if (actuals.length !== 1) {
-      log(`  Cannot rebaseline due to flaky: ${this.path}`);
+      log.warn(`  Ignore rebaseline due to flaky: ${this.path}`);
+      return false;
+    }
+    let testPath = path.parse(this.path);
+    let refPath = path.join(results.testRootDir, testPath.dir, testPath.name + '-expected' + testPath.ext);
+    if (fs.existsSync(refPath)) {
+      log.warn(`  Ignore rebaseline of ref test: ${this.path}`);
       return false;
     }
     let name = this.path.replace(/\.[a-z]+$/, '');
@@ -214,28 +230,17 @@ class TestExpectation {
           ext = '.txt';
           break;
         default:
-          log(`  Cannot rebaseline '${actuals.join(' ')}: ${this.path}`);
+          log.warn(`  Cannot rebaseline '${actuals.join(' ')}: ${this.path}`);
           return false;
       }
-      let source = sourceDir + name + '-actual' + ext;
-      let dest = path.join(rebaselineDir, name + '-expected' + ext);
-      downloads.push(downloadUrl(source, dest));
+      let source = results.sourceDir + name + '-actual' + ext;
+      let dest = path.join(results.rebaselineDir, name + '-expected' + ext);
+      downloads.push(downloadUrl(source, dest)
+        .then(() => log.files.push(dest)));
     }
     async_tasks.push(Promise.all(downloads)
       .then(() => this.remove()));
     return true;
-  }
-
-  addExpect(expect) {
-    if (!expect)
-      return 0;
-    this.confirmedExpectations[expect] = true;
-    if (!(expect in statistics) || this.expectations.includes(expect))
-      return 0;
-    log(`  Adding ${expect} to ${this.path}`);
-    this.expectations.push(expect);
-    statistics[expect]++;
-    return 1;
   }
 
   deflake(deflakeAll) {
@@ -244,22 +249,30 @@ class TestExpectation {
     let confirmCount = Object.keys(this.confirmedExpectations).length;
     if (!confirmCount)
       return false;
-    if (this.confirmedExpectations['Pass'] && confirmCount == 1) {
-      // Don't remove '[ Pass ]', it's to override expectations in different file.
-      if (!(this.expectations.length == 1 && this.expectations[0] == 'Pass')) {
-        log(`  Removing all passes: ${this.path}`);
-        this.remove();
-      }
+
+    if (confirmCount == 1 && this.confirmedExpectations['Pass']) {
+      // Don't remove '[ Pass ]', it's to override expectations in different expectations file.
+      if (this.expectations.length == 1 && this.expectations[0] == 'Pass')
+        return true;
+
+      log(`  Removing all passes: ${this.path}`);
+      this.remove();
       return true;
     }
 
     if (!deflakeAll)
       return;
     let deflaked = this.expectations.filter(e => e in this.confirmedExpectations);
-    if (deflaked.length == this.expectations.length)
+    assert(deflaked.length <= this.expectations.length);
+    if (deflaked.length === this.expectations.length)
       return false;
-    log(`  Deflaking from ${this.expectations} to ${deflaked}: ${this.path}`);
-    this.expectations = deflaked;
+    if (deflaked.length) {
+      log(`  Deflaking from ${this.expectations} to ${deflaked}: ${this.path}`);
+      this.expectations = deflaked;
+    } else {
+      log.warn(`  Deflaking from ${this.expectations} to ${deflaked} using results ${Object.keys(this.confirmedExpectations)}: ${this.path}`);
+      this.remove();
+    }
     statistics.LinesDeflaked = statistics.LinesDeflaked || 0;
     statistics.LinesDeflaked++;
     return true;
@@ -294,16 +307,6 @@ class TestExpectations {
     this.lines = tests;
   }
 
-  add(testPath) {
-    let test = new TestExpectation(options.bug, testPath, []);
-    if (test.shouldNotUpdate)
-      return null;
-    this.lines.push(test);
-    this.testByPath[testPath] = test;
-    statistics.LinesAdded++;
-    return test;
-  }
-
   write() {
     let lines = this.lines
       .filter(test =>
@@ -312,16 +315,26 @@ class TestExpectations {
     fs.writeFileSync(this.path, lines.join('\n') + '\n', 'utf8');
   }
 
+  get expectations() {
+    return this.lines.filter(test =>
+      TestExpectation.isTestExpectation(test) && !test.isRemoved);
+  }
+
   expectation(testPath) {
     assert(testPath);
     return this.testByPath[testPath];
   }
 
+  add(test) {
+    assert(TestExpectation.isTestExpectation(test) && !test.isRemoved);
+    this.lines.push(test);
+    this.testByPath[test.path] = test;
+    statistics.LinesAdded++;
+  }
+
   deflake(deflakeAll) {
     log(`De-flaking ${deflakeAll ? 'all results' : 'passes'}`);
-    for (let test of this.lines) {
-      if (!TestExpectation.isTestExpectation(test))
-        continue;
+    for (let test of this.expectations) {
       test.deflake(deflakeAll);
     }
   }
@@ -478,19 +491,22 @@ class TestResults {
 
     // If this is a test result, update expectations.
     assert(testPath);
-    if (!result.is_unexpected)
+    let shouldUpdate = options.shouldUpdate(testPath);
+    let shouldRebaseline = options.shouldRebaseline(testPath);
+    if (!shouldUpdate && !shouldRebaseline)
       return;
     let test = expectations.expectation(testPath);
-    if (!test) {
-      test = expectations.add(testPath);
-      if (!test)
-        return;
-    }
-    if (test.shouldRebaseline) {
-      test.rebaseline(result, this.sourceDir, this.rebaselineDir);
+    let isNew = !test;
+    if (isNew)
+      test = new TestExpectation(options.bug, testPath);
+    if (shouldRebaseline) {
+      test.rebaseline(result, this);
       return;
     }
-    test.updateExpectations(result);
+    if (shouldUpdate)
+      test.updateExpectations(result);
+    if (isNew && test.expectations.length)
+      expectations.add(test);
   }
 
   static get defaultPath() {
@@ -532,11 +548,16 @@ async function run() {
     expectations.deflake(options['deflake-all']);
   }
 
-  if (async_tasks) {
+  if (async_tasks.length) {
     log('Waiting for all rebaseline tasks to copmlete');
     await Promise.all(async_tasks);
   }
 
+  if (log.warnings.length) {
+    log('WARNINGS:');
+    for (let warning of log.warnings)
+      log(warning);
+  }
   let changeCount = 0;
   for (let key in statistics) {
     let value = statistics[key];
@@ -548,6 +569,12 @@ async function run() {
   if (options.sort)
     expectations.sort();
   expectations.write();
+  log.files.push(expectations.path);
+
+  if (log.files.length) {
+    log(`git: Adding ${log.files.length} files`);
+    child_process.spawnSync('git', ['add'].concat(log.files), { stdio: 'inherit' });
+  }
 }
 
 if (require.main === module) {
