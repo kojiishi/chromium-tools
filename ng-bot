@@ -56,16 +56,10 @@ MY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESULTS_DIR=~/ng-bot
 EXPECTATIONS=${WEBKIT-.}/LayoutTests/FlagExpectations/enable-blink-features=LayoutNG
 BUG=591099
-EXCLUDE=fast/multicol
+EXCLUDE=${EXCLUDE:--p=-fast/multicol}
 args=()
-jobs=()
-commit=1
 
 for arg in "$@"; do
-  if [[ $arg == "-n" ]]; then
-    commit=
-    continue
-  fi
   if [[ $arg == "try" ]]; then
     git cl try -m tryserver.chromium.linux -b linux_layout_tests_layout_ng
     exit
@@ -91,26 +85,7 @@ EOF
     git cl try -m tryserver.chromium.linux -b linux_layout_tests_layout_ng
     exit
   fi
-  if [[ $arg =~ ^[0-9]+$ ]]; then
-    jobs+=($arg)
-    args+=($arg)
-    continue
-  fi
-  if [[ -f "$arg" ]]; then
-    if [[ $arg =~ ([0-9]+)\.json ]]; then
-      jobs+=(${BASH_REMATCH[1]})
-    else
-      jobs+=($arg)
-    fi
-    args+=($arg)
-    continue
-  fi
   args+=("$arg")
 done
 
-(set -x; $MY_DIR/update-expectations -svf "$EXPECTATIONS" -b "$BUG" "-x=$EXCLUDE" "${args[@]}")
-
-if [[ ${#jobs[@]} -gt 0 ]] && [[ "$commit" -eq "1" ]]; then
-  msg="$(echo "${jobs[*]}")"
-  (set -x; git commit -m "$msg")
-fi
+(set -x; $MY_DIR/update-expectations -svf "$EXPECTATIONS" -b "$BUG" "$EXCLUDE" "${args[@]}")

@@ -4,7 +4,7 @@
   "description": "Misc tools",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha"
   },
   "repository": {
     "type": "git",
@@ -17,6 +17,7 @@
   },
   "homepage": "https://github.com/kojiishi/tools#readme",
   "devDependencies": {
+    "mocha": "*",
     "fs-extra": "^5.0.0",
     "minimist": "^1.2.0"
   }
