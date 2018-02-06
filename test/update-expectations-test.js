@@ -1,8 +1,14 @@
-const target = require('../update-expectations');
 const assert = require('assert');
+const path = require('path');
+
+const target = require('../update-expectations');
+const parseArgs = target.parseArgs;
+const TestResult = target.TestResult;
+const TestResults = target.TestResults;
+
+const resultsPath = path.join(__dirname, 'full_results.json');
 
 describe('parseArgs', function () {
-  const parseArgs = target.parseArgs;
   describe('bug', function () {
     it('123', function () {
       let options = parseArgs(['-b', '123']);
@@ -49,5 +55,47 @@ Started:
 `.split(/\n/));
       assert.deepEqual(args, ['3240', '3241', '3242']);
     });
+  });
+});
+
+describe('TestResults', function() {
+  it('load', async function () {
+    const results = await TestResults.load(resultsPath);
+  });
+
+  it('result', async function () {
+    const results = await TestResults.load(resultsPath);
+    const result = results.result('dir1/subdir/reftest.html');
+    assert.equal(result.time, 0.3);
+  });
+
+  it('results', async function () {
+    const results = await TestResults.load(resultsPath);
+    let actual = [];
+    for (let result of results.results) {
+      actual.push(result);
+    }
+    assert.equal(actual.length, 3);
+    let reftest = actual[0];
+    assert.equal(reftest.path, 'dir1/subdir/reftest.html');
+    assert(reftest.isRefTest);
+
+    let unexpected = actual[1];
+    assert.equal(unexpected.path, 'dir1/subdir/unexpected.html');
+    assert(!unexpected.isRefTest);
+
+    let flaky = actual[2];
+    assert.equal(flaky.path, 'dir2/flaky.html');
+    assert(!flaky.isRefTest);
+  });
+});
+
+describe('TestResult', function() {
+  it('actualExpectations', async function () {
+    let result = new TestResult('test', {
+      actual: 'PASS IMAGE IMAGE+TEXT TEXT CRASH TIMEOUT MISSING SKIP'
+    });
+    assert.deepEqual(result.actualExpectations,
+		     [ 'Pass', 'Failure', 'Failure', 'Failure', 'Crash', 'Timeout', 'Skip' ]);
   });
 });

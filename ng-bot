@@ -47,7 +47,7 @@
 #    they should be already downloaded in ~/ng-bot/.
 # 2. Run following commands:
 #    ```bash
-#    $ ng-bot -u= -d ~/ng-bot/*.json
+#    $ ng-bot -d ~/ng-bot/*.json
 #    $ ng-bot upload
 #    ```
 # 3. Review the CL and land it.
