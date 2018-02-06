@@ -93,20 +93,34 @@ describe('TestResults', function() {
 });
 
 describe('TestResult', function() {
-  it('actualExpectations', async function () {
+  it('actualExpectations', function () {
     let result = new TestResult('test', {
       actual: 'PASS IMAGE IMAGE+TEXT TEXT CRASH TIMEOUT MISSING SKIP'
     });
     assert.deepEqual(result.actualExpectations,
 		     [ 'Pass', 'Failure', 'Failure', 'Failure', 'Crash', 'Timeout', 'Skip' ]);
   });
+
+  [
+    {path:'test.html', actual:'IMAGE',
+     expect:[{source: 'test-actual.png', dest: 'test-expected.png'}]},
+    {path:'test.html', actual:'TEXT',
+     expect:[{source: 'test-actual.txt', dest: 'test-expected.txt'}]},
+    {path:'test.html', actual:'IMAGE+TEXT',
+     expect:[{source: 'test-actual.png', dest: 'test-expected.png'},
+	     {source: 'test-actual.txt', dest: 'test-expected.txt'}]},
+  ].forEach(data => it(`rebaselineDataFromActual ${data.actual}`, function () {
+    let result = new TestResult(data.path);
+    let download = Array.from(result.rebaselineDataFromActual(data.actual));
+    assert.deepEqual(download, data.expect);
+  }));
 });
 
 describe('deflake', function() {
   function deflakeTest(expects, actual, args = []) {
     setArgs(args);
     let expectation = new TestExpectation('', 'path', expects);
-    expectation.addActual(actual);
+    expectation.addActualExpectations(actual);
     expectation.deflake();
     return expectation;
   }

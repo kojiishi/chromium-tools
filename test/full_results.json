@@ -1,0 +1,64 @@
+{
+  "build_number": 3313,
+  "builder_name": "linux_layout_tests_layout_ng",
+  "chromium_revision": "refs/heads/master@{#531883}",
+  "fixable": 25941,
+  "interrupted": false,
+  "layout_tests_dir": null,
+  "num_failures_by_type": {
+    "AUDIO": 0,
+    "CRASH": 355,
+    "FAIL": 0,
+    "IMAGE": 2802,
+    "IMAGE+TEXT": 878,
+    "LEAK": 0,
+    "MISSING": 0,
+    "NEEDSMANUALREBASELINE": 0,
+    "PASS": 46132,
+    "REBASELINE": 0,
+    "SKIP": 17916,
+    "SLOW": 0,
+    "TEXT": 3410,
+    "TIMEOUT": 538,
+    "WONTFIX": 1715
+  },
+  "num_flaky": 59,
+  "num_passes": 46132,
+  "num_regressions": 0,
+  "path_delimiter": "/",
+  "pixel_tests_enabled": true,
+  "random_order_seed": 4,
+  "seconds_since_epoch": 1516889667,
+  "skipped": 17916,
+  "tests": {
+    "dir1": {
+      "subdir": {
+        "reftest.html": {
+          "actual": "PASS",
+          "expected": "PASS",
+          "reftest_type": [
+            "=="
+          ],
+          "time": 0.3
+        },
+        "unexpected.html": {
+          "actual": "PASS",
+          "bugs": [
+            "crbug.com/591099"
+          ],
+          "expected": "TIMEOUT",
+          "is_unexpected": true,
+          "time": 5.2
+        }
+      }
+    },
+    "dir2": {
+      "flaky.html": {
+        "actual": "IMAGE PASS",
+        "expected": "PASS",
+        "time": 0.1
+      }
+    }
+  },
+  "version": 3
+}

@@ -109,6 +109,9 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
     let byPath = arrayToDict(args);
     return testPath => testPath in byPath;
   })(argAsArray(options.rebaseline));
+  options.testResultsUrl = build => {
+    return `https://test-results.appspot.com/data/layout_results/linux_layout_tests_layout_ng/${build}/layout-test-results/full_results.json`;
+  };
   return options;
 }
 
@@ -188,7 +191,7 @@ class TestExpectation {
     this.conditions = conditions;
     this.trailing = trailing;
     this.isRemoved = false;
-    this.confirmedExpectations = {};
+    this.actualExpectations = [];
     this.shouldNotUpdate = (this.expectations.length == 1 &&
                              (this.expectations[0] == 'Skip' ||
                               this.expectations[0] == 'NeedsRebaseline' ||
@@ -233,10 +236,9 @@ class TestExpectation {
     statistics.LinesRemoved++;
   }
 
-  addActual(actualExpectations) {
-    for (let expect of actualExpectations) {
-      this.confirmedExpectations[expect] = true;
-    }
+  addActualExpectations(actualExpectations) {
+    Array.prototype.push.apply(this.actualExpectations,
+			       actualExpectations);
   }
 
   update(result) {
@@ -260,23 +262,22 @@ class TestExpectation {
   }
 
   deflake() {
-    if (!this.shouldUpdate)
-      return;
-    let confirmCount = Object.keys(this.confirmedExpectations).length;
-    if (!confirmCount)
+    if (!this.actualExpectations.length)
       return;
     // Don't remove '[ Pass ]', it's to override expectations in different expectations file.
     if (this.expectations.length == 1 && this.expectations[0] == 'Pass')
       return;
 
-    if (confirmCount == 1 && this.confirmedExpectations['Pass']) {
+    let actualExpectations = arrayToDict(this.actualExpectations);
+    if (Object.keys(actualExpectations).length == 1 &&
+	this.actualExpectations[0] == 'Pass') {
       log(`  Removing all passes: ${this.path}`);
       this.remove();
       return;
     }
 
     let deflaked = this.expectations
-	.filter(e => e in this.confirmedExpectations);
+	.filter(e => e in actualExpectations);
     assert(deflaked.length <= this.expectations.length);
     if (deflaked.length === this.expectations.length)
       return;
@@ -284,7 +285,7 @@ class TestExpectation {
       log(`  Deflaking from ${this.expectations} to ${deflaked}: ${this.path}`);
       this.expectations = deflaked;
     } else {
-      log.warn(`  Deflaking from ${this.expectations} to ${deflaked} using results ${Object.keys(this.confirmedExpectations)}: ${this.path}`);
+      log.warn(`  Deflaking from ${this.expectations} to ${deflaked} using results ${Object.keys(actualExpectations)}: ${this.path}`);
       this.remove();
     }
     statistics.LinesDeflaked = statistics.LinesDeflaked || 0;
@@ -345,13 +346,15 @@ class TestExpectations {
     statistics.LinesAdded++;
   }
 
-  addActual(results) {
+  addActualExpectations(results) {
     for (let result of results) {
+      if (!result.shouldUpdate)
+        continue;
       // if (!is_unexpected) continue;
       let expectation = this.expectation(result.path);
       if (!expectation)
         continue;
-      expectation.addActual(result.actualExpectations);
+      expectation.addActualExpectations(result.actualExpectations);
     }
   }
 
@@ -373,7 +376,8 @@ class TestExpectations {
   deflake() {
     log(`De-flaking...`);
     for (let expectation of this.expectations) {
-      expectation.deflake();
+      if (expectation.shouldUpdate)
+        expectation.deflake();
     }
   }
 
@@ -480,6 +484,27 @@ class TestResult {
     }).filter(expect => expect != null);
   }
 
+  * rebaselineDataFromActual(actual) {
+    let name = this.path.replace(/\.[a-z]+$/, '');
+    for (let type of actual.split('+')) {
+      let ext = null;
+      switch (type) {
+        case 'IMAGE':
+          ext = '.png';
+          break;
+        case 'TEXT':
+          ext = '.txt';
+          break;
+        default:
+          throw new Error(`Cannot rebaseline for '${actual}: ${this.path}`);
+      }
+      yield {
+	source: name + '-actual' + ext,
+	dest: name + '-expected' + ext,
+      };
+    }
+  }
+
   rebaseline(results, expectations) {
     if (!this.shouldRebaseline)
       return false;
@@ -498,26 +523,13 @@ class TestResult {
       log.warn(`  Ignore rebaseline of ref test: ${this.path}`);
       return false;
     }
-    let name = this.path.replace(/\.[a-z]+$/, '');
     log(`  Rebaseline ${actuals[0]} for ${this.path}`);
     let downloads = [];
-    for (let type of actuals[0].split('+')) {
-      let ext = null;
-      switch (type) {
-        case 'IMAGE':
-          ext = '.png';
-          break;
-        case 'TEXT':
-          ext = '.txt';
-          break;
-        default:
-          log.warn(`  Cannot rebaseline '${actuals.join(' ')}: ${this.path}`);
-          return false;
-      }
-      let source = results.sourceDir + name + '-actual' + ext;
-      let dest = path.join(results.rebaselineDir, name + '-expected' + ext);
+    for (let download of this.rebaselineDataFromActual(actuals[0])) {
+      let source = results.sourceDir + download.source;
+      let dest = path.join(results.rebaselineDir, download.dest);
       downloads.push(downloadUrl(source, dest)
-        .then(() => log.files.push(dest)));
+		     .then(() => log.files.push(dest)));
     }
     let task = Promise.all(downloads)
 	.then(() => {
@@ -525,7 +537,7 @@ class TestResult {
 	  if (expectation)
 	    expectation.remove();
 	  else
-            log.warn(`Expectation for ${this.path} not found`);
+            log.warn(`Expectation for ${this.path} not found in ${expectations.path}`);
 	});
     async_tasks.push(task);
     return true;
@@ -544,7 +556,7 @@ class TestResults {
     let sourcePath = file;
     if (/^[0-9]+$/.test(file) && !fs.existsSync(file)) {
       let build = file;
-      sourcePath = `https://storage.googleapis.com/chromium-layout-test-archives/linux_layout_tests_layout_ng/${build}/layout-test-results/full_results.json`;
+      sourcePath = options.testResultsUrl(build);
       file = path.join(process.env.HOME, 'ng-bot', build + '.json');
       if (!fs.existsSync(file)) {
         await downloadUrl(sourcePath, file);
@@ -665,7 +677,7 @@ async function run(args) {
     if (options.shouldRebaseline) {
       results.rebaseline(expectations);
     } else if (options.deflake) {
-      expectations.addActual(results);
+      expectations.addActualExpectations(results);
     } else {
       expectations.update(results);
     }
