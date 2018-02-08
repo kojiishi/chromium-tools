@@ -55,7 +55,7 @@
 MY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESULTS_DIR=~/ng-bot
 EXPECTATIONS=${WEBKIT-.}/LayoutTests/FlagExpectations/enable-blink-features=LayoutNG
-BUG=591099
+BUG=${BUG:-591099}
 EXCLUDE=${EXCLUDE:--p=-fast/multicol}
 args=()
 
