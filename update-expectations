@@ -3,8 +3,8 @@
 const assert = require('assert');
 const child_process = require('child_process');
 const fs = require('fs-extra');
-const https = require('https');
 const path = require('path');
+const rp = require('request-promise-native');
 
 let log = () => {};
 const statistics = {
@@ -155,32 +155,28 @@ function parseTryResults(lines) {
   return args;
 }
 
-function downloadUrl(url, dest) {
+function sleep(ms){
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function downloadUrl(url, dest) {
   log(`Downloading from ${url}`);
-  return new Promise((resolve, reject) => {
-    let created = null;
-    https.get(url, response => {
-      log(`HTTP Status=${response.statusCode} for ${url}`);
-      if (response.statusCode != 200) {
-        reject(new Error(`HTTP status ${response.statusCode}`));
-        return;
-      }
-      let dirname = path.dirname(dest);
-      if (dirname)
-        fs.ensureDirSync(dirname);
-      let output = fs.createWriteStream(dest);
-      created = dest;
-      response.pipe(output);
-      output.on('finish', () => {
-        log(`Download completed to ${dest}.`);
-        output.close(resolve);
-      });
-    }).on('error', err => {
-      if (created)
-        fs.unlink(created);
-      reject(err);
-    });
-  });
+  let body;
+  for (let retry = 0; ; ) {
+    try {
+      body = await rp(url);
+      break;
+    } catch (error) {
+      if (++retry > 3)
+        throw error;
+      if (error.statusCode && error.statusCode < 500)
+        throw error;
+      log.warn(`${error}\nRetrying ${retry} from ${url}`);
+      await sleep(1000);
+    }
+  }
+  await fs.outputFile(dest, body);
+  log(`Download completed from ${url}`);
 }
 
 class TestExpectation {
