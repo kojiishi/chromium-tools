@@ -626,6 +626,23 @@ class TestResults {
     return this.data.num_regressions;
   }
 
+  findExpectedFile(expectedPath, platforms) {
+    let testRootDir = this.testRootDir;
+    if (platforms) {
+      let platformDir = path.join(testRootDir, 'platform');
+      for (let platform of platforms) {
+        let p = path.join(platformDir, platform, expectedPath);
+        if (fs.existsSync(p))
+          return p;
+      }
+    }
+    expectedPath = path.join(testRootDir, expectedPath);
+    if (fs.existsSync(expectedPath))
+      return expectedPath;
+    return null;
+  }
+
+
   get testRootDir() {
     if (this._testRootDir)
       return this._testRootDir;

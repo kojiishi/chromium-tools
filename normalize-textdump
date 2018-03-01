@@ -1,0 +1,144 @@
+#!/usr/bin/env node
+/*
+HOW TO USE:
+1. Download layout-test-results.zip and unzip.
+2. % normalize-textdump layout-test-results/full_results.json
+*/
+'use strict';
+const assert = require('assert');
+const fs = require('fs-extra');
+const path = require('path');
+const TestResults = require('./update-expectations').TestResults;
+let log = console.error.bind(console);
+
+class TextRun {
+  constructor() {
+    this.lines_ = [];
+  }
+
+  add(x, y, width, text, indent) {
+    if (this.y !== undefined) {
+      if (y === this.y) {
+        this.xEnd = x + width;
+        this.text += text;
+        return;
+      }
+      this.addLine();
+    }
+    this.x = x;
+    this.xEnd = x + width;
+    this.y = y;
+    this.text = text;
+    this.indent = indent;
+  }
+
+  addLine() {
+    let line = `${this.indent}text run at (${this.x},${this.y}) width ${this.xEnd - this.x}: "${this.text}"`;
+    this.lines_.push(line);
+    this.y = undefined;
+  }
+
+  get lines() {
+    if (this.y !== undefined)
+      this.addLine();
+    return this.lines_;
+  }
+}
+
+class TextDump {
+  constructor(content) {
+    this.content = content;
+  }
+
+  static async load(filePath) {
+    let content = await fs.readFile(filePath, 'utf8');
+    if (!content.startsWith('layer at '))
+      return null;
+    return new TextDump(content);
+  }
+
+  async write(filePath) {
+    await fs.outputFile(filePath, this.content, 'utf8');
+  }
+
+  normalize() {
+    let lines = [];
+    let textRun = null;
+    for (let line of this.content.trimRight().split(/\r?\n/)) {
+      let match = line.match(/^( *)text run at \((\d+),(\d+)\) width (\d+): "(.*)"\s*$/);
+      if (match) {
+        if (!textRun)
+          textRun = new TextRun;
+        textRun.add(parseFloat(match[2]), match[3], parseFloat(match[4]), match[5], match[1]);
+        continue;
+      }
+      if (textRun) {
+        Array.prototype.push.apply(lines, textRun.lines);
+        textRun = null;
+      }
+      match = line.match(/^( *LayoutBR \{BR\} at \(\d+,\d+\) size )(\d+x\d+)\s*$/);
+      if (match) {
+        line = `${match[1]}-x-`;
+      } else {
+        line = line.replace(/LayoutNG/, 'Layout');
+      }
+      lines.push(line);
+    }
+    if (textRun)
+      Array.prototype.push.apply(lines, textRun.lines);
+    this.content = lines.join('\n') + '\n';
+  }
+}
+
+async function run() {
+  let jsonPath = process.argv[2];
+  log(`Loading ${jsonPath}`);
+  const platforms = ['linux', 'win'];
+  let results = await TestResults.load(jsonPath);
+  let resultsDir = path.dirname(jsonPath);
+  let expectedOutDir = path.join(resultsDir, '..', 'expected');
+  let actualOutDir = path.join(resultsDir, '..', 'actual');
+  let textFailures = 0;
+  let generated = 0;
+  let matches = [];
+  for (let result of results) {
+    if (!result.actual.is('TEXT'))
+      continue;
+    textFailures++;
+    let parsedPath = path.parse(result.path);
+    let expectedPath = path.format({
+        dir: parsedPath.dir,
+        name: parsedPath.name + '-expected',
+        ext: '.txt'});
+    // let expected = results.findExpectedFile(expectedPath, platforms);
+    let expected = path.join(resultsDir, expectedPath);
+    if (!fs.existsSync(expected))
+      continue;
+    expected = await TextDump.load(expected);
+    if (!expected)
+      continue;
+    expected.normalize();
+    await expected.write(path.join(expectedOutDir, expectedPath));
+    let actualPath = path.format({
+      dir: parsedPath.dir,
+      name: parsedPath.name + '-actual',
+      ext: '.txt'});
+    let actual = await TextDump.load(path.join(resultsDir, actualPath));
+    assert(actual);
+    actual.normalize();
+    await actual.write(path.join(actualOutDir, expectedPath));
+    if (expected.content === actual.content)
+      matches.push(result.path);
+      generated++;
+  }
+  log(`Total ${textFailures} text failures found.`);
+  log(`Total ${generated} files generated in ${resultsDir}.`);
+  log(`${matches.length} files match after normalize.`);
+  for (let match of matches)
+    console.log(match);
+}
+
+run().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
