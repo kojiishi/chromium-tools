@@ -179,19 +179,66 @@ async function downloadUrl(url, dest) {
   log(`Download completed from ${url}`);
 }
 
+class TestResultTypes {
+  constructor(types = []) {
+    if (Array.isArray(types))
+      this.types = types;
+    else
+      this.types = types.trim().split(/\s+/).filter(t => t);
+  }
+
+  get length() { return this.types.length; }
+
+  get shouldNotUpdate() {
+    return this.types.length == 1 &&
+        (this.types[0] == 'Skip' ||
+         this.types[0] == 'NeedsRebaseline' ||
+         this.types[0] == 'NeedsManualRebaseline');
+  }
+
+  is(type) {
+    return this.types.length == 1 && this.types[0] == type;
+  }
+
+  get isPassOnly() {
+    return this.is('Pass');
+  }
+
+  toArray() {
+    return this.types;
+  }
+
+  deflake(actualExpectations) {
+    if (!actualExpectations.length)
+      return;
+    // Don't remove '[ Pass ]', it's to override expectations in different expectations file.
+    if (this.isPassOnly)
+      return;
+
+    let actualExpectationDict = arrayToDict(actualExpectations);
+    if (Object.keys(actualExpectationDict).length == 1 &&
+	actualExpectations[0] == 'Pass') {
+      this.types = [];
+      return;
+    }
+
+    this.types = this.types
+	.filter(e => e in actualExpectationDict);
+  }
+}
+
 class TestExpectation {
-  constructor(bug, testPath, expectations = [], conditions, trailing) {
+  constructor(bug, testPath, expectations = new TestResultTypes(), conditions, trailing) {
     this.bug = bug;
     this.path = testPath;
+    if (!(expectations instanceof TestResultTypes))
+      expectations = new TestResultTypes(expectations);
     this.expectations = expectations;
     this.conditions = conditions;
     this.trailing = trailing;
     this.isRemoved = false;
     this.actualExpectations = [];
-    this.shouldNotUpdate = (this.expectations.length == 1 &&
-                             (this.expectations[0] == 'Skip' ||
-                              this.expectations[0] == 'NeedsRebaseline' ||
-                              this.expectations[0] == 'NeedsManualRebaseline'));
+    this.shouldNotUpdate = this.expectations.shouldNotUpdate;
   }
 
   static parse(line) {
@@ -199,7 +246,7 @@ class TestExpectation {
       return line;
     let match = line.match(/^(\S*)\s+(\[([^\]]+)]\s+)?(\S+)\s+\[([^\]]+)](.*)/);
     if (match) {
-      return new TestExpectation(match[1], match[4], match[5].trim().split(/\s+/), match[3], match[6]);
+      return new TestExpectation(match[1], match[4], new TestResultTypes(match[5]), match[3], match[6]);
     }
     return null;
   }
@@ -221,8 +268,8 @@ class TestExpectation {
       return null;
     let output = [ this.bug ? this.bug : '' ];
     if (this.conditions)
-      output = output.concat('[', this.conditions.trim(), ']');
-    output = output.concat(this.path, '[', this.expectations, ']');
+    output = output.concat('[', this.conditions.trim(), ']');
+    output = output.concat(this.path, '[', this.expectations.toArray(), ']');
     return output.join(' ') + (this.trailing ? this.trailing : '');
   }
 
@@ -243,47 +290,32 @@ class TestExpectation {
       return 0;
     let addCount = 0;
     for (let expect of result.actualExpectations) {
-      if (!(expect in statistics) || this.expectations.includes(expect))
+      if (!(expect in statistics) || this.expectations.types.includes(expect))
         continue;
       log(`  Adding ${expect} to ${this.path}`);
-      this.expectations.push(expect);
+      this.expectations.types.push(expect);
       statistics[expect]++;
       addCount++;
     }
     if (addCount) {
-      this.expectations.sort();
+      this.expectations.types.sort();
       statistics.LinesChanged++;
     }
     return addCount;
   }
 
   deflake() {
-    if (!this.actualExpectations.length)
+    let before = this.expectations.types;
+    this.expectations.deflake(this.actualExpectations);
+    let deflaked = this.expectations.types;
+    if (before.length === deflaked.length)
       return;
-    // Don't remove '[ Pass ]', it's to override expectations in different expectations file.
-    if (this.expectations.length == 1 && this.expectations[0] == 'Pass')
-      return;
-
-    let actualExpectations = arrayToDict(this.actualExpectations);
-    if (Object.keys(actualExpectations).length == 1 &&
-	this.actualExpectations[0] == 'Pass') {
+    if (!deflaked.length) {
       log(`  Removing all passes: ${this.path}`);
       this.remove();
       return;
     }
-
-    let deflaked = this.expectations
-	.filter(e => e in actualExpectations);
-    assert(deflaked.length <= this.expectations.length);
-    if (deflaked.length === this.expectations.length)
-      return;
-    if (deflaked.length) {
-      log(`  Deflaking from ${this.expectations} to ${deflaked}: ${this.path}`);
-      this.expectations = deflaked;
-    } else {
-      log.warn(`  Deflaking from ${this.expectations} to ${deflaked} using results ${Object.keys(actualExpectations)}: ${this.path}`);
-      this.remove();
-    }
+    log(`  Deflaking from ${before} to ${deflaked}: ${this.path}`);
     statistics.LinesDeflaked = statistics.LinesDeflaked || 0;
     statistics.LinesDeflaked++;
   }
@@ -457,6 +489,10 @@ class TestResult {
     return options.shouldUpdate(this.path);
   }
 
+  get actual() {
+    return new TestResultTypes(this.result.actual);
+  }
+
   get actualExpectations() {
     return this.result.actual.split(/ +/).map(actual => {
       switch (actual) {
@@ -543,8 +579,10 @@ class TestResult {
 class TestResults {
   constructor(results, sourcePath) {
     this.data = results;
-    this.sourcePath = sourcePath;
-    this.sourceDir = path.dirname(sourcePath) + '/';
+    if (sourcePath) {
+      this.sourcePath = sourcePath;
+      this.sourceDir = path.dirname(sourcePath) + '/';
+    }
   }
 
   static async load(file = TestResults.defaultPath) {
@@ -739,4 +777,5 @@ if (require.main === module) {
   module.exports.TestExpectations = TestExpectations;
   module.exports.TestResult = TestResult;
   module.exports.TestResults = TestResults;
+  module.exports.TestResultTypes = TestResultTypes;
 }

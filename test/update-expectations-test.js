@@ -7,6 +7,7 @@ const setArgs = target.setArgs;
 const TestExpectation = target.TestExpectation;
 const TestResult = target.TestResult;
 const TestResults = target.TestResults;
+const TestResultTypes = target.TestResultTypes;
 
 const resultsPath = path.join(__dirname, 'full_results.json');
 
@@ -57,6 +58,17 @@ Started:
 `.split(/\n/));
       assert.deepEqual(args, ['3240', '3241', '3242']);
     });
+  });
+});
+
+describe('TestResultTypes', function() {
+  it('ctor', function () {
+    assert.deepEqual(new TestResultTypes().types, []);
+    assert.deepEqual(new TestResultTypes("").types, []);
+    assert.deepEqual(new TestResultTypes(" ").types, []);
+    assert.deepEqual(new TestResultTypes("a b").types, ['a', 'b']);
+    assert.deepEqual(new TestResultTypes(" a b ").types, ['a', 'b']);
+    assert.deepEqual(new TestResultTypes(['a', 'b']).types, ['a', 'b']);
   });
 });
 
@@ -128,21 +140,21 @@ describe('deflake', function() {
   it('fail', function () {
     let expectation = deflakeTest([ 'Failure' ], [ 'Failure' ]);
     assert(!expectation.isRemoved);
-    assert.deepEqual(expectation.expectations, [ 'Failure' ]);
+    assert.deepEqual(expectation.expectations.toArray(), [ 'Failure' ]);
   });
 
   it('deflake', function () {
     let expectation = deflakeTest([ 'Crash', 'Failure', 'Pass' ],
 				  [ 'Failure' ]);
     assert(!expectation.isRemoved);
-    assert.deepEqual(expectation.expectations, [ 'Failure' ]);
+    assert.deepEqual(expectation.expectations.toArray(), [ 'Failure' ]);
   });
 
   it('flaky', function () {
     let expectation = deflakeTest([ 'Crash', 'Failure' ],
 				  [ 'Crash', 'Failure', 'Pass' ]);
     assert(!expectation.isRemoved);
-    assert.deepEqual(expectation.expectations, [ 'Crash', 'Failure' ]);
+    assert.deepEqual(expectation.expectations.toArray(), [ 'Crash', 'Failure' ]);
   });
 
   it('fixed', function () {
@@ -153,12 +165,12 @@ describe('deflake', function() {
   it('no-confirm should be no-op', function () {
     let expectation = deflakeTest([ 'Failure' ], []);
     assert(!expectation.isRemoved);
-    assert.deepEqual(expectation.expectations, [ 'Failure' ]);
+    assert.deepEqual(expectation.expectations.toArray(), [ 'Failure' ]);
   });
 
   it('pass-only should not be deflaked', function () {
     let expectation = deflakeTest([ 'Pass' ], [ 'Failure' ]);
     assert(!expectation.isRemoved);
-    assert.deepEqual(expectation.expectations, [ 'Pass' ]);
+    assert.deepEqual(expectation.expectations.toArray(), [ 'Pass' ]);
   });
 });
