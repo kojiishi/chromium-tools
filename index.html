@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<title>LayoutNG test failure charts</title>
+<script src="https://www.gstatic.com/charts/loader.js"></script>
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+}
+#by_failure, #by_dir {
+  width: 100%;
+}
+#by_failure {
+  height: 50vh;
+}
+#by_dir {
+  height: 100vh;
+}
+</style>
+<script>
+google.charts.load('current', {'packages':['corechart']});
+const chart_loader = new Promise((resolve, reject) => {
+  google.charts.setOnLoadCallback(resolve);
+});
+const by_failure = loadData('data/by_failure.json');
+const by_dir = loadData('data/by_dir.json');
+
+async function loadData(url) {
+  let rs = await fetch(url);
+  let data = await rs.json();
+  await chart_loader;
+  return google.visualization.arrayToDataTable(data);
+}
+
+function drawChart(id, data) {
+  let element = document.getElementById(id);
+  let renderer = new google.visualization.AreaChart(element);
+  renderer.draw(data, {
+    isStacked: true,
+  });
+}
+
+async function drawCharts() {
+  await chart_loader;
+  drawChart('by_failure', await by_failure);
+  drawChart('by_dir', await by_dir);
+}
+
+window.addEventListener('load', drawCharts);
+window.addEventListener('resize', drawCharts);
+</script>
+<body>
+  <div id="by_failure"></div>
+  <div id="by_dir"></div>
+</body>
