@@ -49,6 +49,7 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   -r <test paths>: Rebaseline specified tests instead of adding to expectations.
      Test paths is space or newline delimited string.
      When it's '-', it's read from stdin.
+     When it's 'spaces', space-only failures will be rebaselined.
   --remove: Remove entries where test files are missing in the local file system.
   -s: Sort the output.
   -v: Verbose.
@@ -106,8 +107,21 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   options.shouldRebaseline = (args => {
     if (!args.length)
       return null;
+    if (args.length === 1 && args[0] === 'spaces') {
+      return result => {
+        if (result.actual.is('TEXT')) {
+	  switch (result.textMismatchCategory) {
+	    case 'spaces and tabs only':
+	    case 'newlines only':
+	    case 'spaces, tabs and newlines only':
+              return true;
+	  }
+	}
+	return false;
+      };
+    }
     let byPath = arrayToDict(args);
-    return testPath => testPath in byPath;
+    return result => result.path in byPath;
   })(argAsArray(options.rebaseline));
   options.testResultsUrl = build => {
     return `https://test-results.appspot.com/data/layout_results/linux_layout_tests_layout_ng/${build}/layout-test-results/full_results.json`;
@@ -493,7 +507,7 @@ class TestResult {
   }
 
   get shouldRebaseline() {
-    return options.shouldRebaseline(this.path);
+    return options.shouldRebaseline(this);
   }
 
   get shouldUpdate() {
@@ -525,6 +539,10 @@ class TestResult {
           throw new Error(`Unknown actual ${actual}`);
       }
     }).filter(expect => expect != null);
+  }
+
+  get textMismatchCategory() {
+    return this.result.text_mismatch;
   }
 
   * rebaselineDataFromActual(actual) {
