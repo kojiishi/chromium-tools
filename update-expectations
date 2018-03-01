@@ -146,29 +146,6 @@ function arrayToDict(array, value = true) {
   return dict;
 }
 
-function parseTryResults(lines) {
-  let ignore = false;
-  let args = [];
-  for (let line of lines) {
-    let match = line.match(/^(.+):$/);
-    if (match) {
-      let state = match[1];
-      ignore = state === 'Scheduled' || state === 'Started' || state === 'Infra Failures';
-      continue;
-    }
-    match = line.match(/^\s+(\S+)\s+\S+\/(\d+)$/);
-    if (match) {
-      if (!ignore)
-        args.push(match[2]);
-      continue;
-    }
-    if (!line || line.startsWith('Total:'))
-      continue;
-    log(`Unrecognized line ignored: ${line}`);
-  }
-  return args;
-}
-
 function sleep(ms){
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -634,6 +611,41 @@ class TestResults {
     return new TestResults(JSON.parse(content), sourcePath);
   }
 
+  static loadArgs(args) {
+    let list = [];
+    for (let arg of args) {
+      if (!fs.existsSync(arg) && 'try-results'.startsWith(arg)) {
+	TestResults.loadTryResults(list);
+	continue;
+      }
+      list.push(TestResults.load(arg));
+    }
+    return list;
+  }
+
+  static loadTryResults(list = []) {
+    log('Running "git cl try-results"...');
+    let results = child_process.execFileSync(
+	'git', ['cl', 'try-results', '--json=-']);
+    for (let build of TestResults.parseTryResults(results)) {
+      list.push(TestResults.load(build));
+    }
+    return list;
+  }
+
+  static parseTryResults(results, list = []) {
+    results = JSON.parse(results);
+    for (let result of results) {
+      let build = result.url.match(/\/(\d+)$/);
+      build = build ? build[1] : null;
+      log(`Build #${build} ${result.result} ${result.status}`);
+      if (result.status !== 'COMPLETED')
+        continue;
+      list.push(build);
+    }
+    return list;
+  }
+
   get message() {
     if (this.data.build_number)
       return this.data.build_number;
@@ -742,12 +754,8 @@ async function run(args) {
   for (let key of Object.keys(options.expects))
     statistics[key] = 0;
 
-  if (!args.length) {
-    let lines = fs.readFileSync('/dev/stdin').toString().split(/\n/);
-    args = parseTryResults(lines);
-  }
   log(`Loading results: ${args.join(' ')}`);
-  args = args.map(arg => TestResults.load(arg));
+  args = TestResults.loadArgs(args);
   let messages = [];
   for (let results of args) {
     results = await results;
@@ -816,7 +824,6 @@ if (require.main === module) {
 } else {
   module.exports = run;
   module.exports.parseArgs = parseArgs;
-  module.exports.parseTryResults = parseTryResults;
   module.exports.setArgs = args =>
       options = parseArgs(args);
   module.exports.TestExpectation = TestExpectation;

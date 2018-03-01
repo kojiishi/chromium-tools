@@ -39,24 +39,22 @@ describe('parseArgs', function () {
   });
 
   describe('tryResults', function () {
-    const parseTryResults = target.parseTryResults;
-    it('one', function () {
+    const parseTryResults = TestResults.parseTryResults;
+    it('parse', function () {
       let args = parseTryResults(
-`  linux_layout_tests_layout_ng  http://build/linux_layout_tests_layout_ng/builds/3241
-`.split(/\n/));
-      assert.deepEqual(args, ['3241']);
-    });
-    it('states', function () {
-      let args = parseTryResults(
-`Success:
-  linux_layout_tests_layout_ng  http://build/linux_layout_tests_layout_ng/builds/3240
-  linux_layout_tests_layout_ng  http://build/linux_layout_tests_layout_ng/builds/3241
-Failures:
-  linux_layout_tests_layout_ng  http://build/linux_layout_tests_layout_ng/builds/3242
-Started:
-  linux_layout_tests_layout_ng  http://build/linux_layout_tests_layout_ng/builds/3243
-`.split(/\n/));
-      assert.deepEqual(args, ['3240', '3241', '3242']);
+`[
+  {
+    "result": "FAILURE",
+    "status": "COMPLETED",
+    "url": "http://test.org/builds/4001"
+  },
+  {
+    "result": "SUCCESS",
+    "status": "COMPLETED",
+    "url": "http://test.org/builds/4004"
+  }
+]`);
+      assert.deepEqual(args, ['4001', '4004']);
     });
   });
 });
