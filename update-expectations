@@ -453,16 +453,27 @@ class TestExpectations {
     this.lines = output;
   }
 
-  static findTestRootDir(dir) {
-    // Traverse ancestor directories to find the test root.
-    for (dir = dir || '.';;) {
-      if (fs.existsSync(path.resolve(dir, 'TestExpectations')))
-        return dir;
-      let parent = path.resolve(dir, '..');
-      if (parent == dir)
-        return null;
+  static webKitDir(hintDir) {
+    let dir = process.env['WEBKIT'];
+    if (dir)
+      return dir;
+    dir = process.env['CHROMIUM_SRC'];
+    if (dir)
+      return path.join(dir, 'third_party', 'WebKit');
+    for (dir = path.resolve(hintDir || '.');;) {
+      let d = path.join(dir, 'WebKit');
+      if (fs.existsSync(d))
+        return d;
+      let parent = path.dirname(dir);
+      if (parent === dir)
+        break;
       dir = parent;
     }
+    throw new Error('WebKit directory not found (set WEBKIT or CHROMIUM_SRC)');
+  }
+
+  static findTestRootDir(hintDir) {
+    return path.join(TestExpectations.webKitDir(hintDir), 'LayoutTests');
   }
 }
 
@@ -622,13 +633,13 @@ class TestResults {
     // Try the directory in results JSON.
     // It may not exist if the JSON is produced in other machines.
     this._testRootDir = this.data.layout_tests_dir;
-    if (fs.existsSync(this._testRootDir)) {
+    if (this._testRootDir && fs.existsSync(this._testRootDir)) {
       log(`Test root directory: ${this._testRootDir}`);
       return this._testRootDir;
     }
 
     this._testRootDir = TestExpectations.findTestRootDir();
-    if (this._testRootDir) {
+    if (this._testRootDir && fs.existsSync(this._testRootDir)) {
       log(`Test root directory: ${this._testRootDir}`);
       return this._testRootDir;
     }
