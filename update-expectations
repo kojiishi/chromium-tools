@@ -109,7 +109,7 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
       return null;
     if (args.length === 1 && args[0] === 'spaces') {
       return result => {
-        if (result.actual.is('TEXT')) {
+        if (result.actuals.is('TEXT')) {
 	  switch (result.textMismatchCategory) {
 	    case 'spaces and tabs only':
 	    case 'newlines only':
@@ -180,6 +180,14 @@ class TestResultTypes {
 
   get length() { return this.types.length; }
 
+  toArray() {
+    return this.types;
+  }
+
+  is(type) {
+    return this.types.length == 1 && this.types[0] == type;
+  }
+
   get shouldNotUpdate() {
     return this.types.length == 1 &&
         (this.types[0] == 'Skip' ||
@@ -187,34 +195,50 @@ class TestResultTypes {
          this.types[0] == 'NeedsManualRebaseline');
   }
 
-  is(type) {
-    return this.types.length == 1 && this.types[0] == type;
+  toExpectations() {
+    return new TestResultTypes(this.types.map(actual => {
+      switch (actual) {
+        case 'PASS':
+          return 'Pass';
+        case 'IMAGE':
+        case 'TEXT':
+        case 'IMAGE+TEXT':
+          return 'Failure';
+        case 'CRASH':
+          return 'Crash';
+        case 'TIMEOUT':
+          return 'Timeout';
+        case 'MISSING':
+          return 'Skip';
+        case 'SKIP':
+          return null;
+        default:
+          throw new Error(`Unknown actual ${actual}`);
+      }
+    }).filter(expect => expect != null));
   }
 
-  get isPassOnly() {
-    return this.is('Pass');
+  push(types) {
+    assert(types instanceof TestResultTypes);
+    Array.prototype.push.apply(this.types, types.types);
   }
 
-  toArray() {
-    return this.types;
-  }
+  deflake(actuals) {
+    assert(actuals instanceof TestResultTypes && actuals.length);
 
-  deflake(actualExpectations) {
-    if (!actualExpectations.length)
-      return;
     // Don't remove '[ Pass ]', it's to override expectations in different expectations file.
-    if (this.isPassOnly)
+    if (this.is('Pass'))
       return;
 
-    let actualExpectationDict = arrayToDict(actualExpectations);
-    if (Object.keys(actualExpectationDict).length == 1 &&
-	actualExpectations[0] == 'Pass') {
+    actuals = new Set(actuals.toExpectations().toArray());
+    if (!actuals.size)
+      return;
+    if (actuals.size == 1 && actuals.has('Pass')) {
       this.types = [];
       return;
     }
 
-    this.types = this.types
-	.filter(e => e in actualExpectationDict);
+    this.types = this.types.filter(e => actuals.has(e));
   }
 }
 
@@ -228,7 +252,7 @@ class TestExpectation {
     this.conditions = conditions;
     this.trailing = trailing;
     this.isRemoved = false;
-    this.actualExpectations = [];
+    this.actuals = null;
     this.shouldNotUpdate = this.expectations.shouldNotUpdate;
   }
 
@@ -270,17 +294,19 @@ class TestExpectation {
     statistics.LinesRemoved++;
   }
 
-  addActualExpectations(actualExpectations) {
-    Array.prototype.push.apply(this.actualExpectations,
-			       actualExpectations);
+  addActuals(actuals) {
+    assert(actuals instanceof TestResultTypes);
+    if (!this.actuals)
+      this.actuals = actuals;
+    else
+      this.actuals.push(actuals);
   }
 
   update(result) {
-    //log(`${this.path}: ${result.actual}`);
     if (this.shouldNotUpdate)
       return 0;
     let addCount = 0;
-    for (let expect of result.actualExpectations) {
+    for (let expect of result.actuals.toExpectations().types) {
       if (!(expect in statistics) || this.expectations.types.includes(expect))
         continue;
       log(`  Adding ${expect} to ${this.path}`);
@@ -296,8 +322,11 @@ class TestExpectation {
   }
 
   deflake() {
+    let actuals = this.actuals;
+    if (!actuals || !actuals.length)
+      return;
     let before = this.expectations.types;
-    this.expectations.deflake(this.actualExpectations);
+    this.expectations.deflake(actuals);
     let deflaked = this.expectations.types;
     if (before.length === deflaked.length)
       return;
@@ -365,7 +394,7 @@ class TestExpectations {
     statistics.LinesAdded++;
   }
 
-  addActualExpectations(results) {
+  addActuals(results) {
     for (let result of results) {
       if (!result.shouldUpdate)
         continue;
@@ -373,7 +402,7 @@ class TestExpectations {
       let expectation = this.expectation(result.path);
       if (!expectation)
         continue;
-      expectation.addActualExpectations(result.actualExpectations);
+      expectation.addActuals(result.actuals);
     }
   }
 
@@ -491,31 +520,8 @@ class TestResult {
     return options.shouldUpdate(this.path);
   }
 
-  get actual() {
+  get actuals() {
     return new TestResultTypes(this.result.actual);
-  }
-
-  get actualExpectations() {
-    return this.result.actual.split(/ +/).map(actual => {
-      switch (actual) {
-        case 'PASS':
-          return 'Pass';
-        case 'IMAGE':
-        case 'TEXT':
-        case 'IMAGE+TEXT':
-          return 'Failure';
-        case 'CRASH':
-          return 'Crash';
-        case 'TIMEOUT':
-          return 'Timeout';
-        case 'MISSING':
-          return 'Skip';
-        case 'SKIP':
-          return null;
-        default:
-          throw new Error(`Unknown actual ${actual}`);
-      }
-    }).filter(expect => expect != null);
   }
 
   get textMismatchCategory() {
@@ -537,8 +543,8 @@ class TestResult {
           throw new Error(`Cannot rebaseline for '${actual}: ${this.path}`);
       }
       yield {
-	source: name + '-actual' + ext,
-	dest: name + '-expected' + ext,
+        source: name + '-actual' + ext,
+        dest: name + '-expected' + ext,
       };
     }
   }
@@ -615,8 +621,8 @@ class TestResults {
     let list = [];
     for (let arg of args) {
       if (!fs.existsSync(arg) && 'try-results'.startsWith(arg)) {
-	TestResults.loadTryResults(list);
-	continue;
+        TestResults.loadTryResults(list);
+        continue;
       }
       list.push(TestResults.load(arg));
     }
@@ -656,19 +662,22 @@ class TestResults {
     return this.data.num_regressions;
   }
 
-  findExpectedFile(expectedPath, platforms) {
+  *baselineDirs(platforms) {
     let testRootDir = this.testRootDir;
     if (platforms) {
       let platformDir = path.join(testRootDir, 'platform');
-      for (let platform of platforms) {
-        let p = path.join(platformDir, platform, expectedPath);
-        if (fs.existsSync(p))
-          return p;
-      }
+      for (let platform of platforms)
+        yield path.join(platformDir, platform);
     }
-    expectedPath = path.join(testRootDir, expectedPath);
-    if (fs.existsSync(expectedPath))
-      return expectedPath;
+    yield testRootDir;
+  }
+
+  baseline(filePath, platforms) {
+    for (let dir of this.baselineDirs(platforms)) {
+      let p = path.join(dir, filePath);
+      if (fs.existsSync(p))
+        return p;
+    }
     return null;
   }
 
@@ -710,7 +719,7 @@ class TestResults {
     return this.resultsRecursive(this.data.tests, '');
   }
 
-  * resultsRecursive(result, testPath) {
+  *resultsRecursive(result, testPath) {
     if (result.actual) {
       yield new TestResult(testPath, result);
       return;
@@ -765,7 +774,7 @@ async function run(args) {
     if (options.shouldRebaseline) {
       results.rebaseline(expectations);
     } else if (options.deflake) {
-      expectations.addActualExpectations(results);
+      expectations.addActuals(results);
     } else {
       expectations.update(results);
     }

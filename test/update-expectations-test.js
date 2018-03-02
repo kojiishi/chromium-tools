@@ -107,8 +107,9 @@ describe('TestResult', function() {
     let result = new TestResult('test', {
       actual: 'PASS IMAGE IMAGE+TEXT TEXT CRASH TIMEOUT MISSING SKIP'
     });
-    assert.deepEqual(result.actualExpectations,
-		     [ 'Pass', 'Failure', 'Failure', 'Failure', 'Crash', 'Timeout', 'Skip' ]);
+    assert.deepEqual(
+        result.actuals.toExpectations().toArray(),
+		    [ 'Pass', 'Failure', 'Failure', 'Failure', 'Crash', 'Timeout', 'Skip' ]);
   });
 
   [
@@ -127,36 +128,38 @@ describe('TestResult', function() {
 });
 
 describe('deflake', function() {
-  function deflakeTest(expects, actual, args = []) {
+  function deflakeTest(expects, actuals, args = []) {
     setArgs(args);
     let expectation = new TestExpectation('', 'path', expects);
-    expectation.addActualExpectations(actual);
+    expectation.addActuals(new TestResultTypes(actuals));
     expectation.deflake();
     return expectation;
   }
 
   it('fail', function () {
-    let expectation = deflakeTest([ 'Failure' ], [ 'Failure' ]);
+    let expectation = deflakeTest([ 'Failure' ], [ 'IMAGE' ]);
     assert(!expectation.isRemoved);
     assert.deepEqual(expectation.expectations.toArray(), [ 'Failure' ]);
   });
 
   it('deflake', function () {
-    let expectation = deflakeTest([ 'Crash', 'Failure', 'Pass' ],
-				  [ 'Failure' ]);
+    let expectation = deflakeTest(
+        [ 'Crash', 'Failure', 'Pass' ],
+				[ 'IMAGE' ]);
     assert(!expectation.isRemoved);
     assert.deepEqual(expectation.expectations.toArray(), [ 'Failure' ]);
   });
 
   it('flaky', function () {
-    let expectation = deflakeTest([ 'Crash', 'Failure' ],
-				  [ 'Crash', 'Failure', 'Pass' ]);
+    let expectation = deflakeTest(
+        [ 'Crash', 'Failure' ],
+		    [ 'CRASH', 'IMAGE', 'PASS' ]);
     assert(!expectation.isRemoved);
     assert.deepEqual(expectation.expectations.toArray(), [ 'Crash', 'Failure' ]);
   });
 
   it('fixed', function () {
-    let expectation = deflakeTest([ 'Failure' ], [ 'Pass' ]);
+    let expectation = deflakeTest([ 'Failure' ], [ 'PASS' ]);
     assert(expectation.isRemoved);
   });
 
@@ -167,7 +170,7 @@ describe('deflake', function() {
   });
 
   it('pass-only should not be deflaked', function () {
-    let expectation = deflakeTest([ 'Pass' ], [ 'Failure' ]);
+    let expectation = deflakeTest([ 'Pass' ], [ 'IMAGE' ]);
     assert(!expectation.isRemoved);
     assert.deepEqual(expectation.expectations.toArray(), [ 'Pass' ]);
   });
