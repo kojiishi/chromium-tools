@@ -53,6 +53,8 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   --remove: Remove entries where test files are missing in the local file system.
   -s: Sort the output.
   -v: Verbose.
+  results.json: The build number, or the path of results.json.
+                If it is 'try-results', it is taken from 'git cl try-results'.
 `);
       }
       return true;
@@ -632,7 +634,7 @@ class TestResults {
   static loadTryResults(list = []) {
     log('Running "git cl try-results"...');
     let results = child_process.execFileSync(
-	'git', ['cl', 'try-results', '--json=-']);
+        'git', ['cl', 'try-results', '--json=-']);
     for (let build of TestResults.parseTryResults(results)) {
       list.push(TestResults.load(build));
     }
@@ -645,10 +647,11 @@ class TestResults {
       let build = result.url.match(/\/(\d+)$/);
       build = build ? build[1] : null;
       log(`Build #${build} ${result.result} ${result.status}`);
-      if (result.status !== 'COMPLETED')
+      if (!build || result.status !== 'COMPLETED')
         continue;
       list.push(build);
     }
+    list.sort((a, b) => parseInt(a) - parseInt(b));
     return list;
   }
 

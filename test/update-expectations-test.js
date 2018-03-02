@@ -41,20 +41,26 @@ describe('parseArgs', function () {
   describe('tryResults', function () {
     const parseTryResults = TestResults.parseTryResults;
     it('parse', function () {
-      let args = parseTryResults(
-`[
-  {
-    "result": "FAILURE",
-    "status": "COMPLETED",
-    "url": "http://test.org/builds/4001"
-  },
-  {
-    "result": "SUCCESS",
-    "status": "COMPLETED",
-    "url": "http://test.org/builds/4004"
-  }
-]`);
+      let args = parseTryResults(`[
+        { "result": "FAILURE", "status": "COMPLETED", "url": "http://test.org/builds/4001" },
+        { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4004" } ]`);
       assert.deepEqual(args, ['4001', '4004']);
+    });
+
+    it('not completed', function () {
+      let args = parseTryResults(`[
+        { "result": "FAILURE", "status": "COMPLETED", "url": "http://test.org/builds/4001" },
+        { "result": null, "status": "STARTED", "url": "http://test.org/builds/4001" },
+        { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4004" } ]`);
+      assert.deepEqual(args, ['4001', '4004']);
+    });
+
+    it('sort', function () {
+      let args = parseTryResults(`[
+        { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4004" },
+        { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/900" },
+        { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4001" } ]`);
+      assert.deepEqual(args, ['900', '4001', '4004']);
     });
   });
 });
