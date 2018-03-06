@@ -6,14 +6,18 @@ html, body {
   margin: 0;
   padding: 0;
 }
-#by_failure, #by_dir {
+.chart {
   width: 100%;
-}
-#by_failure {
   height: 50vh;
 }
-#by_dir {
+#dir {
   height: 100vh;
+}
+#ui {
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 1;
 }
 </style>
 <script>
@@ -31,24 +35,35 @@ async function loadData(url) {
   return google.visualization.arrayToDataTable(data);
 }
 
-function drawChart(id, data) {
+function drawChart(id, data, title) {
   let element = document.getElementById(id);
   let renderer = new google.visualization.AreaChart(element);
+  if (document.getElementById('hasMinDate').checked) {
+    let filters = [{column: 0, minValue: document.getElementById('minDate').value}];
+    data = new google.visualization.DataView(data);
+    data.setRows(data.getFilteredRows(filters));
+  }
   renderer.draw(data, {
     isStacked: true,
+    title: title,
   });
 }
 
 async function drawCharts() {
   await chart_loader;
-  drawChart('by_failure', await by_failure);
-  drawChart('by_dir', await by_dir);
+  drawChart('failure', await by_failure, 'Failure types');
+  drawChart('dir', await by_dir, 'Directories');
 }
 
 window.addEventListener('load', drawCharts);
 window.addEventListener('resize', drawCharts);
 </script>
 <body>
-  <div id="by_failure"></div>
-  <div id="by_dir"></div>
+  <div id="ui">
+    <input id="hasMinDate" type="checkbox" checked onchange="drawCharts()">
+    <label for="hasMinDate">From:</label>
+    <input id="minDate" type="date" value="2018-01-01" onchange="drawCharts()">
+  </div>
+  <div id="failure" class="chart"></div>
+  <div id="dir" class="chart"></div>
 </body>

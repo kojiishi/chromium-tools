@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 const fs = require('fs-extra');
+const path = require('path');
 let log = console.log.bind(console);
 const TestResults = require('./update-expectations').TestResults;
 
@@ -9,8 +10,10 @@ async function run() {
   let by_date = new Set();
   let by_failures = [];
   let by_dirs = [];
+
   // Process in the reversed order to pick up the largest file name in a day.
-  args.reverse();
+  args.sort((a, b) => parseInt(path.basename(b)) - parseInt(path.basename(a)));
+
   for (let arg of args) {
     let results = await fs.readJson(arg);
 
