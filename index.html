@@ -21,7 +21,7 @@ html, body {
 }
 </style>
 <script>
-google.charts.load('current', {'packages':['corechart']});
+google.charts.load('current', {'packages':['corechart', 'table']});
 const chart_loader = new Promise((resolve, reject) => {
   google.charts.setOnLoadCallback(resolve);
 });
@@ -35,24 +35,48 @@ async function loadData(url) {
   return google.visualization.arrayToDataTable(data);
 }
 
-function drawChart(id, data, title) {
+function drawTable(id, data) {
+  let table = new google.visualization.DataTable();
+  table.addColumn('string', 'Directories');
+  let rowIndex = data.getNumberOfRows() - 1;
+  table.addColumn('number', data.getValue(rowIndex, 0));
+  let cols = data.getNumberOfColumns();
+  for (let i = 1; i < cols; i++) {
+    let value = data.getValue(rowIndex, i);
+    if (value)
+      table.addRow([data.getColumnLabel(i), value]);
+  }
+
   let element = document.getElementById(id);
-  let renderer = new google.visualization.AreaChart(element);
+  var renderer = new google.visualization.Table(element);
+  renderer.draw(table, {
+    showRowNumber: true,
+  });
+}
+
+function drawChart(id, data, title, idTable) {
   if (document.getElementById('hasMinDate').checked) {
     let filters = [{column: 0, minValue: document.getElementById('minDate').value}];
     data = new google.visualization.DataView(data);
     data.setRows(data.getFilteredRows(filters));
   }
+
+  let element = document.getElementById(id);
+  let renderer = new google.visualization.AreaChart(element);
   renderer.draw(data, {
     isStacked: true,
     title: title,
+    legend: idTable ? 'none' : null,
   });
+
+  if (idTable)
+    drawTable(idTable, data)
 }
 
 async function drawCharts() {
   await chart_loader;
   drawChart('failure', await by_failure, 'Failure types');
-  drawChart('dir', await by_dir, 'Directories');
+  drawChart('dir', await by_dir, 'Directories', 'table');
 }
 
 window.addEventListener('load', drawCharts);
@@ -66,4 +90,5 @@ window.addEventListener('resize', drawCharts);
   </div>
   <div id="failure" class="chart"></div>
   <div id="dir" class="chart"></div>
+  <div id="table"></div>
 </body>
