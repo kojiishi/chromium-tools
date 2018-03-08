@@ -10,6 +10,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const TestResults = require('./update-expectations').TestResults;
 let log = console.error.bind(console);
+require('./update-expectations').setArgs([]);
 
 class TextRun {
   constructor() {
@@ -107,7 +108,6 @@ class TextDump {
       textFailures++;
 
       // Load -expected.txt text dump.
-      // Continue if it does not exist, or if it is not a text dump.
       let parsedPath = path.parse(result.path);
       let expectedPath = path.format({
           dir: parsedPath.dir,
@@ -117,9 +117,22 @@ class TextDump {
       if (!fs.existsSync(expected))
         continue;
       expected = await TextDump.load(expected);
+      // Skip if it does not exist, or if it is not a text dump.
       if (!expected)
         continue;
       textDumps++;
+
+      // Check if -expected.png exists.
+      // If it does, it means images match.
+      let expectedImage = path.format({
+          dir: parsedPath.dir,
+          name: parsedPath.name + '-expected',
+          ext: '.png'});
+      expectedImage = results.baseline(expectedImage, platforms);
+      if (expectedImage) {
+        hasImages.push(result.path);
+        continue;
+      }
 
       // Load -actual.txt text dump.
       let actualPath = path.format({
@@ -136,24 +149,16 @@ class TextDump {
       await actual.write(path.join(actualOutDir, expectedPath));
       if (expected.content === actual.content) {
         matches.push(result.path);
-      } else {
-        // Check if -expected.png exists.
-        // If it does, it means images match.
-        let expectedImage = path.format({
-            dir: parsedPath.dir,
-            name: parsedPath.name + '-expected',
-            ext: '.png'});
-        expectedImage = results.baseline(expectedImage, platforms);
-        if (expectedImage)
-          hasImages.push(result.path);
       }
     }
 
     log(`${matches.length} match after normalize, and ${hasImages.length} have images
 from ${textDumps} text dumps among ${textFailures} text failures.`);
-    for (let name of matches)
-      console.log(name);
+    console.log('## text failures that have matched images');
     for (let name of hasImages)
+      console.log(name);
+    console.log('## text failures that match after normalize');
+    for (let name of matches)
       console.log(name);
   }
 }
