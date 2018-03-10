@@ -851,4 +851,7 @@ if (require.main === module) {
   module.exports.TestResult = TestResult;
   module.exports.TestResults = TestResults;
   module.exports.TestResultTypes = TestResultTypes;
+
+  // Ensure options is available.
+  options = parseArgs([]);
 }

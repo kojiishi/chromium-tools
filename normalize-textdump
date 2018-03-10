@@ -10,7 +10,6 @@ const fs = require('fs-extra');
 const path = require('path');
 const TestResults = require('./update-expectations').TestResults;
 let log = console.error.bind(console);
-require('./update-expectations').setArgs([]);
 
 class TextRun {
   constructor() {
