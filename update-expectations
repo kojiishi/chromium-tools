@@ -657,7 +657,7 @@ class TestResults {
     for (let result of results) {
       let build = result.url.match(/\/(\d+)$/);
       build = build ? build[1] : null;
-      log(`Build #${build} ${result.result} ${result.status}`);
+      log(`Build #${build} ${result.status} ${result.result || ''}`);
       if (!build || result.status !== 'COMPLETED')
         continue;
       list.push(build);
