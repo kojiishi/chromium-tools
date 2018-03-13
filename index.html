@@ -32,10 +32,13 @@ class Data {
   }
 
   async dataTable() {
+    if (this.dataTable_)
+      return this.dataTable_;
     let rs = await this.rs;
     let json = await rs.json();
     await chart_loader;
-    return google.visualization.arrayToDataTable(json);
+    this.dataTable_ = google.visualization.arrayToDataTable(json);
+    return this.dataTable_;
   }
 
   async data() {
