@@ -644,7 +644,9 @@ class TestResults {
     log('Running "git cl try-results"...');
     let results = child_process.execFileSync(
         'git', ['cl', 'try-results', '--json=-']);
-    for (let build of TestResults.parseTryResults(results)) {
+    let builds = TestResults.parseTryResults(results);
+    log(`try-results are: ${builds.join(' ')}`);
+    for (let build of builds) {
       list.push(TestResults.load(build));
     }
     return list;
