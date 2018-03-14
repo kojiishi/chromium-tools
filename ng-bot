@@ -56,7 +56,6 @@ MY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESULTS_DIR=~/ng-bot
 EXPECTATIONS=${WEBKIT-.}/LayoutTests/FlagExpectations/enable-blink-features=LayoutNG
 BUG=${BUG:-591099}
-EXCLUDE=${EXCLUDE:--p=-fast/multicol}
 args=()
 
 for arg in "$@"; do
@@ -76,7 +75,7 @@ $COMMIT_MESSAGE
 0 lines were removed and 0 lines were deflaked by consecutive
 results since 0.
 
-TBR=eae@chromium.org
+TBR=eae@chromium.org, mstensho@chromium.org
 NOTRY=true
 Bug: $BUG
 EOF
@@ -88,4 +87,4 @@ EOF
   args+=("$arg")
 done
 
-(set -x; $MY_DIR/update-expectations -svf "$EXPECTATIONS" -b "$BUG" "$EXCLUDE" "${args[@]}")
+(set -x; $MY_DIR/update-expectations -svf "$EXPECTATIONS" -b "$BUG" "${args[@]}")
