@@ -15,29 +15,33 @@ const statistics = {
 let async_tasks = [];
 let options;
 
-function parseArgs(args) {
-  const minimist = require('minimist');
-  args = args || process.argv.slice(2);
-  const options = minimist(args, {
-    boolean: ['deflake', 'no-commit', 'remove', 'sort', 'verbose'],
-    string: ['bug', 'expects', 'file', 'path', 'rebaseline'],
-    alias: {
-      b: 'bug',
-      d: 'deflake',
-      e: 'expects',
-      f: 'file',
-      n: 'no-commit',
-      p: 'path',
-      r: 'rebaseline',
-      s: 'sort',
-      v: 'verbose',
-    },
-    default: {
-      expects: '*',
-    },
-    unknown: arg => {
-      if (arg.startsWith('-')) {
-        throw new Error(`Unknown option ${arg}
+class Options {
+  constructor() {
+  }
+
+  static parseArgs(args) {
+    const minimist = require('minimist');
+    args = args || process.argv.slice(2);
+    const options = minimist(args, {
+      boolean: ['deflake', 'no-commit', 'remove', 'sort', 'verbose'],
+      string: ['bug', 'expects', 'file', 'path', 'rebaseline'],
+      alias: {
+        b: 'bug',
+        d: 'deflake',
+        e: 'expects',
+        f: 'file',
+        n: 'no-commit',
+        p: 'path',
+        r: 'rebaseline',
+        s: 'sort',
+        v: 'verbose',
+      },
+      default: {
+        expects: '*',
+      },
+      unknown: arg => {
+        if (arg.startsWith('-')) {
+          throw new Error(`Unknown option ${arg}
 Usage: ${path.basename(__filename)} [options] [results.json...]
   -b <bug>: The bug number/string for new entries.
   -d: De-flake if all results are pass.
@@ -57,90 +61,95 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
                 If it is 'local', the last result of local runs is used.
                 If it is 'try-results', it is taken from 'git cl try-results'.
 `);
-      }
-      return true;
-    },
-  });
-  if (options.verbose)
-    log = console.log.bind(console);
-  log.files = [];
-  log.warnings = [];
-  log.warn = msg => {
-    log(msg);
-    log.warnings.push(msg);
-  };
-  if (options.bug && options.bug.match(/^\d/))
-    options.bug = 'crbug.com/' + options.bug;
-  options.expects = (args => {
-    if (!args.length)
-      return {};
-    if (args[0][0] === '-')
-      args = ['*'].concat(args);
-    let expects = {};
-    for (let arg of args) {
-      if (arg === '*') {
-        for (let e of ['Pass', 'Failure', 'Crash', 'Timeout'])
-          expects[e] = 0;
-      } else if (arg[0] === '-') {
-        delete expects[arg.slice(1)];
-      } else {
-        expects[arg] = 0;
-      }
-    }
-    return expects;
-  })(argAsArray(options.expects));
-  options.shouldUpdate = (args => {
-    if (!args.length)
-      return () => true;
-    return testPath => {
-      let whenNotFound = true;
+        }
+        return true;
+      },
+    });
+    if (options.verbose)
+      log = console.log.bind(console);
+    log.files = [];
+    log.warnings = [];
+    log.warn = msg => {
+      log(msg);
+      log.warnings.push(msg);
+    };
+    if (options.bug && options.bug.match(/^\d/))
+      options.bug = 'crbug.com/' + options.bug;
+    options.expects = (args => {
+      if (!args.length)
+        return {};
+      if (args[0][0] === '-')
+        args = ['*'].concat(args);
+      let expects = {};
       for (let arg of args) {
-        if (arg.startsWith('-')) {
-          if (testPath.includes(arg.slice(1)))
-            return false;
+        if (arg === '*') {
+          for (let e of ['Pass', 'Failure', 'Crash', 'Timeout'])
+            expects[e] = 0;
+        } else if (arg[0] === '-') {
+          delete expects[arg.slice(1)];
         } else {
-          if (testPath.includes(arg))
-            return true;
-          whenNotFound = false;
+          expects[arg] = 0;
         }
       }
-      return whenNotFound;
-    };
-  })(argAsArray(options.path));
-  options.shouldRebaseline = (args => {
-    if (!args.length)
-      return null;
-    if (args.length === 1 && args[0] === 'spaces') {
-      return result => {
-        if (result.actuals.is('TEXT')) {
-	  switch (result.textMismatchCategory) {
-	    case 'spaces and tabs only':
-	    case 'newlines only':
-	    case 'spaces, tabs and newlines only':
+      return expects;
+    })(argAsArray(options.expects));
+    options.shouldUpdate = (args => {
+      if (!args.length)
+        return () => true;
+      return testPath => {
+        let whenNotFound = true;
+        for (let arg of args) {
+          if (arg.startsWith('-')) {
+            if (testPath.includes(arg.slice(1)))
+              return false;
+          } else {
+            if (testPath.includes(arg))
               return true;
-	  }
-	}
-	return false;
+            whenNotFound = false;
+          }
+        }
+        return whenNotFound;
       };
-    }
-    let byPath = arrayToDict(args);
-    return result => result.path in byPath;
-  })(argAsArray(options.rebaseline));
-  options.testResultsUrl = build => {
-    return `https://test-results.appspot.com/data/layout_results/linux_layout_tests_layout_ng/${build}/layout-test-results/full_results.json`;
-  };
+    })(argAsArray(options.path));
+    options.shouldRebaseline = (args => {
+      if (!args.length)
+        return null;
+      if (args.length === 1 && args[0] === 'spaces') {
+        return result => {
+          if (result.actuals.is('TEXT')) {
+            switch (result.textMismatchCategory) {
+              case 'spaces and tabs only':
+              case 'newlines only':
+              case 'spaces, tabs and newlines only':
+                return true;
+            }
+          }
+          return false;
+        };
+      }
+      let byPath = arrayToDict(args);
+      return result => result.path in byPath;
+    })(argAsArray(options.rebaseline));
+    options.__proto__ = new Options;
+    return options;
+  }
 
-  options.buildDir = () => {
+  testResultsUrl(build) {
+    return `https://test-results.appspot.com/data/layout_results/linux_layout_tests_layout_ng/${build}/layout-test-results/full_results.json`;
+  }
+
+  get buildDir() {
     return process.env.CHROMIUM_OUTPUT_DIR;
-  };
-  options.webKitDir = (hintDir) => {
+  }
+
+  get webKitDir() {
     let dir = process.env['WEBKIT'];
     if (dir)
       return dir;
     dir = process.env['CHROMIUM_SRC'];
     if (dir)
       return path.join(dir, 'third_party', 'WebKit');
-    for (dir = path.resolve(hintDir || '.');;) {
+    for (dir = path.resolve(this.hintDir || '.');;) {
       let d = path.join(dir, 'WebKit');
       if (fs.existsSync(d))
         return d;
@@ -150,11 +159,29 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
       dir = parent;
     }
     throw new Error('WebKit directory not found (set WEBKIT or CHROMIUM_SRC)');
-  };
-  options.testRootDir = (hintDir) => {
-    return path.join(options.webKitDir(hintDir), 'LayoutTests');
-  };
-  return options;
+  }
+
+  get testRootDir() {
+    return path.join(this.webKitDir, 'LayoutTests');
+  }
+
+  *baselineDirs(platforms, flags, testRootDir = this.testRootDir) {
+    if (flags) {
+      let flagDir = path.join(testRootDir, 'flag-specific');
+      for (let flag of flags)
+        yield path.join(flagDir, flag);
+    }
+    if (platforms) {
+      let platformDir = path.join(testRootDir, 'platform');
+      for (let platform of platforms)
+        yield path.join(platformDir, platform);
+    }
+    yield testRootDir;
+  }
+
+  addHintDir(dir) {
+    this.hintDir = dir;
+  }
 }
 
 function argAsArray(arg) {
@@ -244,6 +271,23 @@ class TestResultTypes {
           throw new Error(`Unknown actual ${actual}`);
       }
     }).filter(expect => expect != null));
+  }
+
+  *failureExtensions() {
+    for (let actual of this.types) {
+      for (let type of actual.split('+')) {
+        switch (type) {
+          case 'IMAGE':
+            yield '.png';
+            break;
+          case 'TEXT':
+            yield '.txt';
+            break;
+          default:
+            throw new Error(`Cannot rebaseline for '${actual}: ${this.path}`);
+        }
+      }
+    }
   }
 
   push(types) {
@@ -458,8 +502,10 @@ class TestExpectations {
   }
 
   removeIfNotExists(testRootDir) {
-    if (!testRootDir)
-      testRootDir = options.testRootDir(this.path);
+    if (!testRootDir) {
+      options.addHintDir(this.path);
+      testRootDir = options.testRootDir;
+    }
     log(`Checking non-existent tests in ${testRootDir}`);
     return this.removeIf(test => {
       if (test.path && !test.exists(testRootDir)) {
@@ -533,20 +579,10 @@ class TestResult {
     return this.result.text_mismatch;
   }
 
-  * rebaselineDataFromActual(actual) {
+  *rebaselineDataFromActual(actuals) {
+    assert(actuals instanceof TestResultTypes);
     let name = this.path.replace(/\.[a-z]+$/, '');
-    for (let type of actual.split('+')) {
-      let ext = null;
-      switch (type) {
-        case 'IMAGE':
-          ext = '.png';
-          break;
-        case 'TEXT':
-          ext = '.txt';
-          break;
-        default:
-          throw new Error(`Cannot rebaseline for '${actual}: ${this.path}`);
-      }
+    for (let ext of actuals.failureExtensions()) {
       yield {
         source: name + '-actual' + ext,
         dest: name + '-expected' + ext,
@@ -561,7 +597,7 @@ class TestResult {
       log.warn(`Cannot rebaseline a ref-test: ${this.path}`);
       return false;
     }
-    let actuals = this.result.actual.split(/ +/);
+    let actuals = this.actuals;
     if (actuals.length !== 1) {
       log.warn(`  Ignore rebaseline due to flaky: ${this.path}`);
       return false;
@@ -572,9 +608,9 @@ class TestResult {
       log.warn(`  Ignore rebaseline of ref test: ${this.path}`);
       return false;
     }
-    log(`  Rebaseline ${actuals[0]} for ${this.path}`);
+    log(`  Rebaseline ${actuals} for ${this.path}`);
     let downloads = [];
-    for (let download of this.rebaselineDataFromActual(actuals[0])) {
+    for (let download of this.rebaselineDataFromActual(actuals)) {
       let source = results.sourceDir + download.source;
       let dest = path.join(results.rebaselineDir, download.dest);
       downloads.push(downloadUrl(source, dest)
@@ -602,7 +638,7 @@ class TestResults {
     }
   }
 
-  static async load(file = TestResults.defaultPath) {
+  static async load(file) {
     // If this is a build#, download from the layout-test-archive.
     let sourcePath = file;
     if (/^[0-9]+$/.test(file) && !fs.existsSync(file)) {
@@ -627,7 +663,7 @@ class TestResults {
     for (let arg of args) {
       if (!fs.existsSync(arg)) {
         if ('local'.startsWith(arg)) {
-          list.push(TestResults.load());
+          list.push(TestResults.load(TestResults.defaultPath));
           continue;
         }
         if ('try-results'.startsWith(arg)) {
@@ -676,18 +712,12 @@ class TestResults {
     return this.data.num_regressions;
   }
 
-  *baselineDirs(platforms) {
-    let testRootDir = this.testRootDir;
-    if (platforms) {
-      let platformDir = path.join(testRootDir, 'platform');
-      for (let platform of platforms)
-        yield path.join(platformDir, platform);
-    }
-    yield testRootDir;
+  baselineDirs(platforms, flags) {
+    return options.baselineDir(platforms, flags, this.testRootDir);
   }
 
-  baseline(filePath, platforms) {
-    for (let dir of this.baselineDirs(platforms)) {
+  baseline(filePath, platforms, flags) {
+    for (let dir of this.baselineDirs(platforms, flags)) {
       let p = path.join(dir, filePath);
       if (fs.existsSync(p))
         return p;
@@ -708,7 +738,7 @@ class TestResults {
       return this._testRootDir;
     }
 
-    this._testRootDir = options.testRootDir();
+    this._testRootDir = options.testRootDir;
     if (this._testRootDir && fs.existsSync(this._testRootDir)) {
       log(`Test root directory: ${this._testRootDir}`);
       return this._testRootDir;
@@ -766,7 +796,7 @@ class TestResults {
   }
 
   static get defaultPath() {
-    return path.resolve(options.buildDir(), 'layout-test-results', 'full_results.json');
+    return path.resolve(options.buildDir, 'layout-test-results', 'full_results.json');
   }
 }
 
@@ -838,16 +868,17 @@ async function run(args) {
 }
 
 if (require.main === module) {
-  options = parseArgs();
+  options = Options.parseArgs();
   run(options._).catch(err => {
     console.log(err);
     process.exit(1);
   });
 } else {
   module.exports = run;
-  module.exports.parseArgs = parseArgs;
+  module.exports.Options = Options;
+  module.exports.parseArgs = Options.parseArgs;
   module.exports.setArgs = args =>
-      options = parseArgs(args);
+      options = Options.parseArgs(args);
   module.exports.TestExpectation = TestExpectation;
   module.exports.TestExpectations = TestExpectations;
   module.exports.TestResult = TestResult;
@@ -855,5 +886,5 @@ if (require.main === module) {
   module.exports.TestResultTypes = TestResultTypes;
 
   // Ensure options is available.
-  options = parseArgs([]);
+  options = Options.parseArgs([]);
 }

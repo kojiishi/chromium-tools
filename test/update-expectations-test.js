@@ -4,6 +4,7 @@ const path = require('path');
 const target = require('../update-expectations');
 const parseArgs = target.parseArgs;
 const setArgs = target.setArgs;
+const Options = target.Options;
 const TestExpectation = target.TestExpectation;
 const TestResult = target.TestResult;
 const TestResults = target.TestResults;
@@ -11,57 +12,73 @@ const TestResultTypes = target.TestResultTypes;
 
 const resultsPath = path.join(__dirname, 'full_results.json');
 
-describe('parseArgs', function () {
-  describe('bug', function () {
-    it('123', function () {
-      let options = parseArgs(['-b', '123']);
-      assert.equal(options.bug, 'crbug.com/123');
+describe('Options', function () {
+  const options = new Options;
+  describe('parseArgs', function () {
+    describe('bug', function () {
+      it('123', function () {
+        let options = parseArgs(['-b', '123']);
+        assert.equal(options.bug, 'crbug.com/123');
+      });
+    });
+
+    describe('expects', function () {
+      it('default', function () {
+        let options = parseArgs([]);
+        assert.deepEqual(options.expects, { Pass: 0, Failure: 0, Crash: 0, Timeout: 0 });
+      });
+      it('none', function () {
+        let options = parseArgs(['-e=']);
+        assert.deepEqual(options.expects, {});
+      });
+      it('exclude', function () {
+        let options = parseArgs(['-e=-Pass']);
+        assert.deepEqual(options.expects, { Failure: 0, Crash: 0, Timeout: 0 });
+      });
+      it('set', function () {
+        let options = parseArgs(['-e=Failure,Crash']);
+        assert.deepEqual(options.expects, { Failure: 0, Crash: 0 });
+      });
+    });
+
+    describe('tryResults', function () {
+      const parseTryResults = TestResults.parseTryResults;
+      it('parse', function () {
+        let args = parseTryResults(`[
+          { "result": "FAILURE", "status": "COMPLETED", "url": "http://test.org/builds/4001" },
+          { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4004" } ]`);
+        assert.deepEqual(args, ['4001', '4004']);
+      });
+
+      it('not completed', function () {
+        let args = parseTryResults(`[
+          { "result": "FAILURE", "status": "COMPLETED", "url": "http://test.org/builds/4001" },
+          { "result": null, "status": "STARTED", "url": "http://test.org/builds/4001" },
+          { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4004" } ]`);
+        assert.deepEqual(args, ['4001', '4004']);
+      });
+
+      it('sort', function () {
+        let args = parseTryResults(`[
+          { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4004" },
+          { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/900" },
+          { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4001" } ]`);
+        assert.deepEqual(args, ['900', '4001', '4004']);
+      });
     });
   });
 
-  describe('expects', function () {
-    it('default', function () {
-      let options = parseArgs([]);
-      assert.deepEqual(options.expects, { Pass: 0, Failure: 0, Crash: 0, Timeout: 0 });
-    });
-    it('none', function () {
-      let options = parseArgs(['-e=']);
-      assert.deepEqual(options.expects, {});
-    });
-    it('exclude', function () {
-      let options = parseArgs(['-e=-Pass']);
-      assert.deepEqual(options.expects, { Failure: 0, Crash: 0, Timeout: 0 });
-    });
-    it('set', function () {
-      let options = parseArgs(['-e=Failure,Crash']);
-      assert.deepEqual(options.expects, { Failure: 0, Crash: 0 });
-    });
-  });
-
-  describe('tryResults', function () {
-    const parseTryResults = TestResults.parseTryResults;
-    it('parse', function () {
-      let args = parseTryResults(`[
-        { "result": "FAILURE", "status": "COMPLETED", "url": "http://test.org/builds/4001" },
-        { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4004" } ]`);
-      assert.deepEqual(args, ['4001', '4004']);
-    });
-
-    it('not completed', function () {
-      let args = parseTryResults(`[
-        { "result": "FAILURE", "status": "COMPLETED", "url": "http://test.org/builds/4001" },
-        { "result": null, "status": "STARTED", "url": "http://test.org/builds/4001" },
-        { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4004" } ]`);
-      assert.deepEqual(args, ['4001', '4004']);
-    });
-
-    it('sort', function () {
-      let args = parseTryResults(`[
-        { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4004" },
-        { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/900" },
-        { "result": "SUCCESS", "status": "COMPLETED", "url": "http://test.org/builds/4001" } ]`);
-      assert.deepEqual(args, ['900', '4001', '4004']);
-    });
+  it('baselineDir', function () {
+    assert.deepEqual(Array.from(options.baselineDirs(null, null, 'LayoutTests')),
+                     ['LayoutTests']);
+    assert.deepEqual(Array.from(options.baselineDirs([], [], 'LayoutTests')),
+                     ['LayoutTests']);
+    assert.deepEqual(Array.from(options.baselineDirs(['a', 'b'], null, 'LayoutTests')),
+                     ['LayoutTests/platform/a', 'LayoutTests/platform/b',
+                      'LayoutTests']);
+    assert.deepEqual(Array.from(options.baselineDirs(null, ['a'], 'LayoutTests')),
+                     ['LayoutTests/flag-specific/a',
+                      'LayoutTests']);
   });
 });
 
@@ -73,6 +90,16 @@ describe('TestResultTypes', function() {
     assert.deepEqual(new TestResultTypes("a b").types, ['a', 'b']);
     assert.deepEqual(new TestResultTypes(" a b ").types, ['a', 'b']);
     assert.deepEqual(new TestResultTypes(['a', 'b']).types, ['a', 'b']);
+  });
+  it('failureExtensions', function () {
+    assert.deepEqual(Array.from(new TestResultTypes([]).failureExtensions()),
+                     []);
+    assert.deepEqual(Array.from(new TestResultTypes(['IMAGE']).failureExtensions()),
+                     ['.png']);
+    assert.deepEqual(Array.from(new TestResultTypes(['TEXT']).failureExtensions()),
+                     ['.txt']);
+    assert.deepEqual(Array.from(new TestResultTypes(['IMAGE+TEXT']).failureExtensions()),
+                     ['.png', '.txt']);
   });
 });
 
@@ -128,7 +155,7 @@ describe('TestResult', function() {
 	     {source: 'test-actual.txt', dest: 'test-expected.txt'}]},
   ].forEach(data => it(`rebaselineDataFromActual ${data.actual}`, function () {
     let result = new TestResult(data.path);
-    let download = Array.from(result.rebaselineDataFromActual(data.actual));
+    let download = Array.from(result.rebaselineDataFromActual(new TestResultTypes(data.actual)));
     assert.deepEqual(download, data.expect);
   }));
 });
