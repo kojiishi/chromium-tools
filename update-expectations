@@ -24,7 +24,7 @@ class Options {
     args = args || process.argv.slice(2);
     const options = minimist(args, {
       boolean: ['deflake', 'no-commit', 'remove', 'sort', 'verbose'],
-      string: ['bug', 'expects', 'file', 'path', 'rebaseline'],
+      string: ['bug', 'expects', 'file', 'flag', 'path', 'rebaseline'],
       alias: {
         b: 'bug',
         d: 'deflake',
@@ -165,6 +165,12 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
     return path.join(this.webKitDir, 'LayoutTests');
   }
 
+  *testExpectationsPaths() {
+    if (this.flag)
+      yield path.join(this.testRootDir, 'FlagExpectations', this.flag);
+    yield path.join(this.testRootDir, 'TestExpectations');
+  }
+
   *baselineDirs(platforms, flags, testRootDir = this.testRootDir) {
     if (flags) {
       let flagDir = path.join(testRootDir, 'flag-specific');
@@ -201,6 +207,10 @@ function arrayToDict(array, value = true) {
   return dict;
 }
 
+function isIterator(obj) {
+  return typeof obj[Symbol.iterator] === 'function';
+}
+
 function sleep(ms){
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -235,9 +245,8 @@ class TestResultTypes {
 
   get length() { return this.types.length; }
 
-  toArray() {
-    return this.types;
-  }
+  toArray() { return this.types; }
+  toString() { return '[ ' + this.types.join(' ') + ' ]'; }
 
   is(type) {
     return this.types.length == 1 && this.types[0] == type;
@@ -297,19 +306,9 @@ class TestResultTypes {
 
   deflake(actuals) {
     assert(actuals instanceof TestResultTypes && actuals.length);
-
-    // Don't remove '[ Pass ]', it's to override expectations in different expectations file.
-    if (this.is('Pass'))
-      return;
-
     actuals = new Set(actuals.toExpectations().toArray());
     if (!actuals.size)
-      return;
-    if (actuals.size == 1 && actuals.has('Pass')) {
-      this.types = [];
-      return;
-    }
-
+      return; // Cannot deflake without actual results.
     this.types = this.types.filter(e => actuals.has(e));
   }
 }
@@ -393,23 +392,39 @@ class TestExpectation {
     return addCount;
   }
 
-  deflake() {
+  deflake(testExpectations) {
     let actuals = this.actuals;
     if (!actuals || !actuals.length)
       return;
     let before = this.expectations.types;
     this.expectations.deflake(actuals);
+    if (this.removeIfNeeded(testExpectations, before))
+      return;
     let deflaked = this.expectations.types;
     if (before.length === deflaked.length)
       return;
-    if (!deflaked.length) {
-      log(`  Removing all passes: ${this.path}`);
-      this.remove();
-      return;
-    }
     log(`  Deflaking from ${before} to ${deflaked}: ${this.path}`);
     statistics.LinesDeflaked = statistics.LinesDeflaked || 0;
     statistics.LinesDeflaked++;
+  }
+
+  removeIfNeeded(testExpectations, originalExpectations) {
+    if (!this.expectations.length) {
+    } else if (this.expectations.is('Pass')) {
+      // Don't remove '[ Pass ]', if it's to override parent expectations files.
+      if (!testExpectations)
+        return false;
+      let parent = testExpectations.parentExpectation(this.path);
+      if (parent) {
+        log(`  Leave ${this.path} ${this.expectations} because its parent is ${parent}`);
+        return false;
+      }
+    } else {
+      return false;
+    }
+    log(`  Removing ${this.path} ${originalExpectations || this.expectations} with ${this.actuals}`);
+    this.remove();
+    return true;
   }
 
   exists(testRoot) {
@@ -418,10 +433,15 @@ class TestExpectation {
 }
 
 class TestExpectations {
-  constructor(file) {
-    this.path = file;
-    log(`Reading expectations file from ${file}`);
-    let inputText = fs.readFileSync(file, 'utf8');
+  constructor(files) {
+    if (isIterator(files))
+      files = Array.from(files);
+    if (!Array.isArray(files))
+      files = [files];
+    this.path = files[0];
+    this.parentPaths = files.slice(1);
+    log(`Reading expectations file from ${this.path}`);
+    let inputText = fs.readFileSync(this.path, 'utf8');
     this.parse(inputText);
   }
 
@@ -457,6 +477,24 @@ class TestExpectations {
   expectation(testPath) {
     assert(testPath);
     return this.testByPath[testPath];
+  }
+
+  get parent() {
+    if (this.parent_)
+      return this.parent_;
+    if (this.parentPaths.length)
+      return this.parent_ = new TestExpectations(this.parentPaths);
+    return null;
+  }
+
+  parentExpectation(testPath) {
+    let parent = this.parent;
+    if (!parent)
+      return null;
+    let expectation = parent.expectation(testPath);
+    if (expectation)
+      return expectation;
+    return parent.parentExpectation(testPath);
   }
 
   add(expectation) {
@@ -801,7 +839,7 @@ class TestResults {
 }
 
 async function run(args) {
-  let expectations = options.file ? new TestExpectations(options.file) : null;
+  let expectations = new TestExpectations(options.testExpectationsPaths());
   log(`Checking test results for: ${Object.keys(options.expects).join(', ')}`);
   for (let key of Object.keys(options.expects))
     statistics[key] = 0;
@@ -811,9 +849,6 @@ async function run(args) {
   let messages = [];
   for (let results of args) {
     results = await results;
-    if (!expectations) {
-      expectations = new TestExpectations(path.resolve(results.testRootDir, 'TestExpectations'));
-    }
     if (options.shouldRebaseline) {
       results.rebaseline(expectations);
     } else if (options.deflake) {

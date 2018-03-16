@@ -54,7 +54,7 @@
 #
 MY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESULTS_DIR=~/ng-bot
-EXPECTATIONS=${WEBKIT-.}/LayoutTests/FlagExpectations/enable-blink-features=LayoutNG
+FLAG=enable-blink-features=LayoutNG
 BUG=${BUG:-591099}
 args=()
 
@@ -87,4 +87,4 @@ EOF
   args+=("$arg")
 done
 
-(set -x; $MY_DIR/update-expectations -svf "$EXPECTATIONS" -b "$BUG" "${args[@]}")
+(set -x; $MY_DIR/update-expectations -sv -b "$BUG" --flag "$FLAG" "${args[@]}")

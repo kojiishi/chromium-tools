@@ -142,7 +142,7 @@ describe('TestResult', function() {
     });
     assert.deepEqual(
         result.actuals.toExpectations().toArray(),
-		    [ 'Pass', 'Failure', 'Failure', 'Failure', 'Crash', 'Timeout', 'Skip' ]);
+        [ 'Pass', 'Failure', 'Failure', 'Failure', 'Crash', 'Timeout', 'Skip' ]);
   });
 
   [
@@ -152,7 +152,7 @@ describe('TestResult', function() {
      expect:[{source: 'test-actual.txt', dest: 'test-expected.txt'}]},
     {path:'test.html', actual:'IMAGE+TEXT',
      expect:[{source: 'test-actual.png', dest: 'test-expected.png'},
-	     {source: 'test-actual.txt', dest: 'test-expected.txt'}]},
+             {source: 'test-actual.txt', dest: 'test-expected.txt'}]},
   ].forEach(data => it(`rebaselineDataFromActual ${data.actual}`, function () {
     let result = new TestResult(data.path);
     let download = Array.from(result.rebaselineDataFromActual(new TestResultTypes(data.actual)));
@@ -176,17 +176,15 @@ describe('deflake', function() {
   });
 
   it('deflake', function () {
-    let expectation = deflakeTest(
-        [ 'Crash', 'Failure', 'Pass' ],
-				[ 'IMAGE' ]);
+    let expectation = deflakeTest([ 'Crash', 'Failure', 'Pass' ],
+                                  [ 'IMAGE' ]);
     assert(!expectation.isRemoved);
     assert.deepEqual(expectation.expectations.toArray(), [ 'Failure' ]);
   });
 
   it('flaky', function () {
-    let expectation = deflakeTest(
-        [ 'Crash', 'Failure' ],
-		    [ 'CRASH', 'IMAGE', 'PASS' ]);
+    let expectation = deflakeTest([ 'Crash', 'Failure' ],
+                                  [ 'CRASH', 'IMAGE', 'PASS' ]);
     assert(!expectation.isRemoved);
     assert.deepEqual(expectation.expectations.toArray(), [ 'Crash', 'Failure' ]);
   });
@@ -200,11 +198,5 @@ describe('deflake', function() {
     let expectation = deflakeTest([ 'Failure' ], []);
     assert(!expectation.isRemoved);
     assert.deepEqual(expectation.expectations.toArray(), [ 'Failure' ]);
-  });
-
-  it('pass-only should not be deflaked', function () {
-    let expectation = deflakeTest([ 'Pass' ], [ 'IMAGE' ]);
-    assert(!expectation.isRemoved);
-    assert.deepEqual(expectation.expectations.toArray(), [ 'Pass' ]);
   });
 });
