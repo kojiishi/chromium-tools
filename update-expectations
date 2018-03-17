@@ -373,11 +373,14 @@ class TestExpectation {
       this.actuals.push(actuals);
   }
 
-  update(result) {
+  update() {
     if (this.shouldNotUpdate)
-      return 0;
+      return;
+    let actuals = this.actuals;
+    if (!actuals || !actuals.length)
+      return;
     let addCount = 0;
-    for (let expect of result.actuals.toExpectations().types) {
+    for (let expect of actuals.toExpectations().types) {
       if (!(expect in statistics) || this.expectations.types.includes(expect))
         continue;
       log(`  Adding ${expect} to ${this.path}`);
@@ -389,7 +392,6 @@ class TestExpectation {
       this.expectations.types.sort();
       statistics.LinesChanged++;
     }
-    return addCount;
   }
 
   deflake(testExpectations) {
@@ -410,6 +412,7 @@ class TestExpectation {
 
   removeIfNeeded(testExpectations, originalExpectations) {
     if (!this.expectations.length) {
+      // Remove if no expectations.
     } else if (this.expectations.is('Pass')) {
       // Don't remove '[ Pass ]', if it's to override parent expectations files.
       if (!testExpectations)
@@ -504,9 +507,9 @@ class TestExpectations {
     statistics.LinesAdded++;
   }
 
-  addActuals(results) {
+  addActuals(results, onlyUnexpected) {
     for (let result of results) {
-      if (!result.shouldUpdate)
+      if (!result.shouldUpdate || (onlyUnexpected && !result.isUnexpected))
         continue;
       // if (!is_unexpected) continue;
       let expectation = this.expectation(result.path);
@@ -516,18 +519,11 @@ class TestExpectations {
     }
   }
 
-  update(results) {
-    log(`Updating expectations from ${results.toString()}`);
-    for (let result of results) {
-      if (!result.shouldUpdate || !result.isUnexpected)
-        continue;
-      let expectation = this.expectation(result.path);
-      let isNew = !expectation;
-      if (isNew)
-        expectation = new TestExpectation(options.bug, result.path);
-      expectation.update(result);
-      if (isNew && expectation.expectations.length)
-        this.add(expectation);
+  update() {
+    log(`Updating expectations...`);
+    for (let expectation of this.expectations) {
+      if (expectation.shouldUpdate)
+        expectation.update();
     }
   }
 
@@ -535,7 +531,7 @@ class TestExpectations {
     log(`De-flaking...`);
     for (let expectation of this.expectations) {
       if (expectation.shouldUpdate)
-        expectation.deflake();
+        expectation.deflake(this);
     }
   }
 
@@ -854,7 +850,7 @@ async function run(args) {
     } else if (options.deflake) {
       expectations.addActuals(results);
     } else {
-      expectations.update(results);
+      expectations.addActuals(results, true);
     }
     messages.push(results.message);
   }
@@ -864,8 +860,12 @@ async function run(args) {
     let missingTests = expectations.removeIfNotExists();
     summary.push(`  Removed due to missing tests: ${missingTests}`);
   }
-  if (options.deflake) {
+
+  if (options.shouldRebaseline) {
+  } else if (options.deflake) {
     expectations.deflake();
+  } else {
+    expectations.update();
   }
 
   if (async_tasks.length) {
