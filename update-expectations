@@ -207,6 +207,13 @@ function arrayToDict(array, value = true) {
   return dict;
 }
 
+function *filter(iterable, predicate) {
+  for (let i of iterable) {
+    if (predicate(i))
+      yield i;
+  }
+}
+
 function isIterator(obj) {
   return typeof obj[Symbol.iterator] === 'function';
 }
@@ -244,7 +251,7 @@ class TestResultTypes {
   }
 
   get length() { return this.types.length; }
-
+  [Symbol.iterator]() { return this.types[Symbol.iterator](); }
   toArray() { return this.types; }
   toString() { return '[ ' + this.types.join(' ') + ' ]'; }
 
@@ -507,20 +514,23 @@ class TestExpectations {
     statistics.LinesAdded++;
   }
 
-  addActuals(results, onlyUnexpected) {
+  addActuals(results, addNew = false) {
     for (let result of results) {
-      if (!result.shouldUpdate || (onlyUnexpected && !result.isUnexpected))
+      if (!result.shouldUpdate)
         continue;
-      // if (!is_unexpected) continue;
       let expectation = this.expectation(result.path);
-      if (!expectation)
-        continue;
+      if (!expectation) {
+        if (!addNew)
+          continue;
+        expectation = new TestExpectation(options.bug, result.path);
+        this.add(expectation);
+      }
       expectation.addActuals(result.actuals);
     }
   }
 
   update() {
-    log(`Updating expectations...`);
+    log(`Updating expectations in ${this.path}...`);
     for (let expectation of this.expectations) {
       if (expectation.shouldUpdate)
         expectation.update();
@@ -850,7 +860,8 @@ async function run(args) {
     } else if (options.deflake) {
       expectations.addActuals(results);
     } else {
-      expectations.addActuals(results, true);
+      expectations.addActuals(filter(results, r => r.isUnexpected),
+                              true);
     }
     messages.push(results.message);
   }
