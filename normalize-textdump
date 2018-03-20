@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+'use strict';
 /*
 HOW TO USE:
 1. Download layout-test-results.zip and unzip.
@@ -11,30 +12,70 @@ const path = require('path');
 const TestResults = require('./update-expectations').TestResults;
 let log = console.error.bind(console);
 
+class Box {
+  static parse(line) {
+    let match = line.match(/^( *)(\w+) (\S+) at \((\d+),(\d+)\) size (\d+)x(\d+)(\s.*)?$/);
+    if (!match)
+      return null;
+    let box = new Box;
+    box.leading = match[1];
+    box.name = match[2];
+    box.tag = match[3];
+    box.x = match[4];
+    box.y = match[5];
+    box.width = match[6];
+    box.height = match[7];
+    box.trailing = match[8];
+    return box;
+  }
+
+  toString() {
+    return [this.leading, this.name, ' ', this.tag, ' at (',
+        this.x, ',', this.y, ') size ', this.width, 'x', this.height,
+        this.trailing].join('');
+  }
+}
+
 class TextRun {
   constructor() {
     this.lines_ = [];
   }
 
-  add(x, y, width, text, indent) {
-    if (this.y !== undefined) {
-      if (y === this.y) {
-        this.xEnd = x + width;
-        this.text += text;
-        return;
-      }
-      this.addLine();
+  static parse(line) {
+    let match = line.match(/^( *)text run at \((\d+),(\d+)\) width (\d+): "(.*)"\s*$/);
+    if (!match)
+      return null;
+    let textRun = new TextRun;
+    textRun.leading = match[1];
+    textRun.x = parseFloat(match[2]);
+    textRun.y = match[3];
+    textRun.xEnd = textRun.x + parseFloat(match[4]);
+    textRun.text = match[5];
+    return textRun;
+  }
+
+  add(textRun) {
+    if (textRun.y === this.y) {
+      this.xEnd = textRun.xEnd;
+      this.text += textRun.text;
+      return;
     }
-    this.x = x;
-    this.xEnd = x + width;
-    this.y = y;
-    this.text = text;
-    this.indent = indent;
+    if (this.y !== undefined)
+      this.addLine();
+    this.x = textRun.x;
+    this.xEnd = textRun.xEnd;
+    this.y = textRun.y;
+    this.text = textRun.text;
+    this.leading = textRun.leading;
+  }
+
+  toString() {
+    let width = '###';
+    return `${this.leading}text run at (${this.x},${this.y}) width ${width}: "${this.text.trimRight()}"`;
   }
 
   addLine() {
-    let line = `${this.indent}text run at (${this.x},${this.y}) width ${this.xEnd - this.x}: "${this.text}"`;
-    this.lines_.push(line);
+    this.lines_.push(this.toString());
     this.y = undefined;
   }
 
@@ -51,8 +92,10 @@ class TextDump {
   }
 
   static async load(filePath) {
+    if (!fs.existsSync(filePath))
+      return null;
     let content = await fs.readFile(filePath, 'utf8');
-    if (!content.startsWith('layer at '))
+    if (!content.includes('layer at '))
       return null;
     return new TextDump(content);
   }
@@ -63,29 +106,35 @@ class TextDump {
 
   normalize() {
     let lines = [];
-    let textRun = null;
+    let currentTextRun = null;
     for (let line of this.content.trimRight().split(/\r?\n/)) {
-      let match = line.match(/^( *)text run at \((\d+),(\d+)\) width (\d+): "(.*)"\s*$/);
-      if (match) {
-        if (!textRun)
-          textRun = new TextRun;
-        textRun.add(parseFloat(match[2]), match[3], parseFloat(match[4]), match[5], match[1]);
+      let textRun = TextRun.parse(line);
+      if (textRun) {
+        if (!currentTextRun)
+          currentTextRun = textRun;
+        else
+          currentTextRun.add(textRun);
         continue;
       }
-      if (textRun) {
-        Array.prototype.push.apply(lines, textRun.lines);
-        textRun = null;
+      if (currentTextRun) {
+        Array.prototype.push.apply(lines, currentTextRun.lines);
+        currentTextRun = null;
       }
-      match = line.match(/^( *LayoutBR \{BR\} at \(\d+,\d+\) size )(\d+x\d+)\s*$/);
-      if (match) {
-        line = `${match[1]}-x-`;
-      } else {
-        line = line.replace(/LayoutNG/, 'Layout');
+      let box = Box.parse(line);
+      if (box) {
+        if (box.name === 'LayoutText') {
+          box.width = '###';
+        } else if (box.name === 'LayoutBR') {
+          box.x = box.y = box.width = box.height = '###';
+        } else {
+          box.name = box.name.replace('LayoutNG', 'Layout');
+        }
+        line = box.toString();
       }
       lines.push(line);
     }
-    if (textRun)
-      Array.prototype.push.apply(lines, textRun.lines);
+    if (currentTextRun)
+      Array.prototype.push.apply(lines, currentTextRun.lines);
     this.content = lines.join('\n') + '\n';
   }
 
@@ -99,24 +148,19 @@ class TextDump {
     let textFailures = 0;
     let textDumps = 0;
     let generated = 0;
-    let hasImages = [];
-    let matches = [];
+    let failures = [];
     for (let result of results) {
       if (!result.actuals.is('TEXT'))
         continue;
       textFailures++;
 
       // Load -expected.txt text dump.
-      let parsedPath = path.parse(result.path);
+      let testPath = path.parse(result.path);
       let expectedPath = path.format({
-          dir: parsedPath.dir,
-          name: parsedPath.name + '-expected',
+          dir: testPath.dir,
+          name: testPath.name + '-expected',
           ext: '.txt'});
-      let expected = path.join(resultsDir, expectedPath);
-      if (!fs.existsSync(expected))
-        continue;
-      expected = await TextDump.load(expected);
-      // Skip if it does not exist, or if it is not a text dump.
+      let expected = await TextDump.load(path.join(resultsDir, expectedPath));
       if (!expected)
         continue;
       textDumps++;
@@ -124,19 +168,15 @@ class TextDump {
       // Check if -expected.png exists.
       // If it does, it means images match.
       let expectedImage = path.format({
-          dir: parsedPath.dir,
-          name: parsedPath.name + '-expected',
+          dir: testPath.dir,
+          name: testPath.name + '-expected',
           ext: '.png'});
       expectedImage = results.baseline(expectedImage, platforms);
-      if (expectedImage) {
-        hasImages.push(result.path);
-        continue;
-      }
 
       // Load -actual.txt text dump.
       let actualPath = path.format({
-        dir: parsedPath.dir,
-        name: parsedPath.name + '-actual',
+        dir: testPath.dir,
+        name: testPath.name + '-actual',
         ext: '.txt'});
       let actual = await TextDump.load(path.join(resultsDir, actualPath));
       assert(actual);
@@ -146,19 +186,24 @@ class TextDump {
       await expected.write(path.join(expectedOutDir, expectedPath));
       actual.normalize();
       await actual.write(path.join(actualOutDir, expectedPath));
-      if (expected.content === actual.content) {
-        matches.push(result.path);
-      }
+
+      failures.push({
+        path: result.path,
+        hasImage: expectedImage,
+        matches: expected.content === actual.content,
+      });
     }
 
-    log(`${matches.length} match after normalize, and ${hasImages.length} have images
-from ${textDumps} text dumps among ${textFailures} text failures.`);
-    console.log('## text failures that have matched images');
-    for (let name of hasImages)
-      console.log(name);
-    console.log('## text failures that match after normalize');
-    for (let name of matches)
-      console.log(name);
+    log(`From ${textDumps} text dumps among ${textFailures} text failures.`);
+    function output(title, dumps) {
+      console.log(`## ${title} (${dumps.length})`);
+      for (let dump of dumps)
+        console.log(dump.path);
+    }
+    output('Has image and text match', failures.filter(d => d.hasImage && d.matches));
+    output('Has image but text did not match', failures.filter(d => d.hasImage && !d.matches));
+    output('No image but text match', failures.filter(d => !d.hasImage && d.matches));
+    output('No image and text did not match', failures.filter(d => !d.hasImage && !d.matches));
   }
 }
 
