@@ -757,7 +757,7 @@ class TestResults {
   }
 
   baselineDirs(platforms, flags) {
-    return options.baselineDir(platforms, flags, this.testRootDir);
+    return options.baselineDirs(platforms, flags, this.testRootDir);
   }
 
   baseline(filePath, platforms, flags) {
