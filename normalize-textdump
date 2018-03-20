@@ -95,8 +95,6 @@ class TextDump {
     if (!fs.existsSync(filePath))
       return null;
     let content = await fs.readFile(filePath, 'utf8');
-    if (!content.includes('layer at '))
-      return null;
     return new TextDump(content);
   }
 
@@ -114,6 +112,7 @@ class TextDump {
           currentTextRun = textRun;
         else
           currentTextRun.add(textRun);
+        this.hasTextDump = true;
         continue;
       }
       if (currentTextRun) {
@@ -126,11 +125,11 @@ class TextDump {
           box.width = '###';
         } else if (box.name === 'LayoutBR') {
           box.x = box.y = box.width = box.height = '###';
-        } else {
-          box.name = box.name.replace('LayoutNG', 'Layout');
         }
         line = box.toString();
+        this.hasTextDump = true;
       }
+      line = line.replace('LayoutNG', 'Layout');
       lines.push(line);
     }
     if (currentTextRun)
@@ -146,7 +145,6 @@ class TextDump {
     let expectedOutDir = path.join(resultsDir, '..', 'expected');
     let actualOutDir = path.join(resultsDir, '..', 'actual');
     let textFailures = 0;
-    let textDumps = 0;
     let generated = 0;
     let failures = [];
     for (let result of results) {
@@ -163,7 +161,6 @@ class TextDump {
       let expected = await TextDump.load(path.join(resultsDir, expectedPath));
       if (!expected)
         continue;
-      textDumps++;
 
       // Check if -expected.png exists.
       // If it does, it means images match.
@@ -180,30 +177,41 @@ class TextDump {
         ext: '.txt'});
       let actual = await TextDump.load(path.join(resultsDir, actualPath));
       assert(actual);
+      assert(actual.content !== expected.content);
 
       // Normalize both expected and actual, and compare them.
       expected.normalize();
-      await expected.write(path.join(expectedOutDir, expectedPath));
       actual.normalize();
-      await actual.write(path.join(actualOutDir, expectedPath));
 
-      failures.push({
+      let failure = {
         path: result.path,
         hasImage: expectedImage,
+        hasTextDump: expected.hasTextDump,
         matches: expected.content === actual.content,
-      });
+      };
+      if (failure.hasTextDump) {
+        await expected.write(path.join(expectedOutDir, expectedPath));
+        await actual.write(path.join(actualOutDir, expectedPath));
+      }
+      failures.push(failure);
     }
 
-    log(`From ${textDumps} text dumps among ${textFailures} text failures.`);
-    function output(title, dumps) {
-      console.log(`## ${title} (${dumps.length})`);
-      for (let dump of dumps)
-        console.log(dump.path);
+    log(`From ${failures.length} text dumps among ${textFailures} text failures.`);
+    function output(title, list, showList = true) {
+      console.log(`## ${title} (${list.length})`);
+      if (showList) {
+        for (let item of list)
+          console.log(item.path);
+      }
     }
-    output('Has image and text match', failures.filter(d => d.hasImage && d.matches));
-    output('Has image but text did not match', failures.filter(d => d.hasImage && !d.matches));
-    output('No image but text match', failures.filter(d => !d.hasImage && d.matches));
-    output('No image and text did not match', failures.filter(d => !d.hasImage && !d.matches));
+    output('Has image and text dump match', failures.filter(d => d.hasImage && d.hasTextDump && d.matches));
+    output('Has image and non-text dump match', failures.filter(d => d.hasImage && !d.hasTextDump && d.matches));
+    output('Has image but text dump did not match', failures.filter(d => d.hasImage && d.hasTextDump && !d.matches));
+    output('Has image but non-text dump did not match', failures.filter(d => d.hasImage && !d.hasTextDump && !d.matches));
+    output('No image but text dump match', failures.filter(d => !d.hasImage && d.hasTextDump && d.matches));
+    output('No image but non-text dump match', failures.filter(d => !d.hasImage && !d.hasTextDump && d.matches));
+    output('No image and text dump did not match', failures.filter(d => !d.hasImage && d.hasTextDump && !d.matches));
+    output('No image, non-text dump did not match', failures.filter(d => !d.hasImage && !d.hasTextDump && !d.matches), false);
   }
 }
 
