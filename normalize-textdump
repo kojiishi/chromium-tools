@@ -7,6 +7,7 @@ HOW TO USE:
 */
 'use strict';
 const assert = require('assert');
+const child_process = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const TestResults = require('./update-expectations').TestResults;
@@ -142,11 +143,10 @@ class TextDump {
     const platforms = ['linux', 'win'];
     let results = await TestResults.load(jsonPath);
     let resultsDir = path.dirname(jsonPath);
-    let expectedOutDir = path.join(resultsDir, '..', 'expected');
-    let actualOutDir = path.join(resultsDir, '..', 'actual');
+    let outDir = path.join(resultsDir, 'normalized');
     let textFailures = 0;
     let generated = 0;
-    let failures = [];
+    let items = [];
     for (let result of results) {
       if (!result.actuals.is('TEXT'))
         continue;
@@ -162,13 +162,16 @@ class TextDump {
       if (!expected)
         continue;
 
+      let item = { path: result.path };
+
       // Check if -expected.png exists.
       // If it does, it means images match.
-      let expectedImage = path.format({
+      let expectedImagePath = path.format({
           dir: testPath.dir,
           name: testPath.name + '-expected',
           ext: '.png'});
-      expectedImage = results.baseline(expectedImage, platforms);
+      if (results.baseline(expectedImagePath, platforms))
+        item.hasImage = true;
 
       // Load -actual.txt text dump.
       let actualPath = path.format({
@@ -182,21 +185,26 @@ class TextDump {
       // Normalize both expected and actual, and compare them.
       expected.normalize();
       actual.normalize();
+      item.hasTextDump = expected.hasTextDump;
+      if (expected.content === actual.content)
+        item.matches = true;
 
-      let failure = {
-        path: result.path,
-        hasImage: expectedImage,
-        hasTextDump: expected.hasTextDump,
-        matches: expected.content === actual.content,
-      };
-      if (failure.hasTextDump) {
-        await expected.write(path.join(expectedOutDir, expectedPath));
-        await actual.write(path.join(actualOutDir, expectedPath));
+      if (item.hasTextDump) {
+        let normalizedExpected = path.join(outDir, expectedPath)
+        await expected.write(normalizedExpected);
+        let normalizedActual = path.join(outDir, actualPath);
+        await actual.write(normalizedActual);
+        if (!item.matches) {
+          this.createDiff(normalizedExpected, normalizedActual,
+            path.join(outDir, testPath.dir, testPath.name + '-diff.txt'));
+        }
       }
-      failures.push(failure);
+      items.push(item);
     }
 
-    log(`From ${failures.length} text dumps among ${textFailures} text failures.`);
+    await fs.outputJson(path.join(outDir, 'normalized.json'), items);
+
+    log(`From ${items.length} text dumps among ${textFailures} text items.`);
     function output(title, list, showList = true) {
       console.log(`## ${title} (${list.length})`);
       if (showList) {
@@ -204,14 +212,22 @@ class TextDump {
           console.log(item.path);
       }
     }
-    output('Has image and text dump match', failures.filter(d => d.hasImage && d.hasTextDump && d.matches));
-    output('Has image and non-text dump match', failures.filter(d => d.hasImage && !d.hasTextDump && d.matches));
-    output('Has image but text dump did not match', failures.filter(d => d.hasImage && d.hasTextDump && !d.matches));
-    output('Has image but non-text dump did not match', failures.filter(d => d.hasImage && !d.hasTextDump && !d.matches));
-    output('No image but text dump match', failures.filter(d => !d.hasImage && d.hasTextDump && d.matches));
-    output('No image but non-text dump match', failures.filter(d => !d.hasImage && !d.hasTextDump && d.matches));
-    output('No image and text dump did not match', failures.filter(d => !d.hasImage && d.hasTextDump && !d.matches));
-    output('No image, non-text dump did not match', failures.filter(d => !d.hasImage && !d.hasTextDump && !d.matches), false);
+    output('Has image and text dump match', items.filter(d => d.hasImage && d.hasTextDump && d.matches));
+    output('Has image and non-text dump match', items.filter(d => d.hasImage && !d.hasTextDump && d.matches));
+    output('Has image but text dump did not match', items.filter(d => d.hasImage && d.hasTextDump && !d.matches));
+    output('Has image but non-text dump did not match', items.filter(d => d.hasImage && !d.hasTextDump && !d.matches));
+    output('No image but text dump match', items.filter(d => !d.hasImage && d.hasTextDump && d.matches));
+    output('No image but non-text dump match', items.filter(d => !d.hasImage && !d.hasTextDump && d.matches));
+    output('No image and text dump did not match', items.filter(d => !d.hasImage && d.hasTextDump && !d.matches));
+    output('No image, non-text dump did not match', items.filter(d => !d.hasImage && !d.hasTextDump && !d.matches), false);
+  }
+
+  static createDiff(expected, actual, out) {
+    let child = child_process.spawn('diff', ['-u', expected, actual], {
+      stdio: [null, 'pipe'],
+    });
+    let outStream = fs.createWriteStream(out);
+    child.stdout.pipe(outStream);
   }
 }
 

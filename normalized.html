@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<style>
+details {
+  margin-bottom: 1em;
+}
+.item {
+  cursor: pointer;
+}
+iframe {
+  width: 100%;
+  height: 400px;
+}
+.hidden {
+  display: none;
+}
+</style>
+<body>
+<template id="item">
+  <div class="item">
+    <span class="path"></span>
+    <div class="details"></div>
+  </div>
+</template>
+<script>
+class Results {
+  constructor() {
+    this.rs = fetch('layout-test-results/normalized/normalized.json');
+  }
+
+  async items() {
+    return (await this.rs).json();
+  }
+
+  async render() {
+    let items = await this.items();
+    this.renderWithFilter('Has image and text dump match',
+      items.filter(i => i.hasImage && i.hasTextDump && i.matches));
+    this.renderWithFilter('Has image and non-text dump match',
+      items.filter(i => i.hasImage && !i.hasTextDump && i.matches));
+    this.renderWithFilter('Has image but text dump did not match',
+      items.filter(i => i.hasImage && i.hasTextDump && !i.matches));
+    this.renderWithFilter('Has image but non-text dump did not match',
+      items.filter(i => i.hasImage && !i.hasTextDump && !i.matches));
+    this.renderWithFilter('No image but text dump match',
+      items.filter(i => !i.hasImage && i.hasTextDump && i.matches));
+    this.renderWithFilter('No image but non-text dump match',
+      items.filter(i => !i.hasImage && !i.hasTextDump && i.matches));
+    this.renderWithFilter('No image and text dump did not match',
+      items.filter(i => !i.hasImage && i.hasTextDump && !i.matches));
+    this.renderWithFilter('No image, non-text dump did not match',
+      items.filter(i => !i.hasImage && !i.hasTextDump && !i.matches));
+  }
+
+  renderWithFilter(title, items) {
+    let parent = document.createElement('details');
+    parent.open = true;
+    let heading = document.createElement('summary');
+    heading.textContent = `${title} (${items.length})`;
+    parent.appendChild(heading);
+    let rowTemplate = document.getElementById('item').content.children[0];
+    for (let item of items) {
+      let row = document.importNode(rowTemplate, true);
+      row.querySelector('.path').textContent = item.path;
+      row.addEventListener('click', e => {
+        this.onClickItem(item, row);
+      });
+      parent.appendChild(row);
+    }
+    document.body.appendChild(parent);
+  }
+
+  onClickItem(item, row) {
+    let parent = row.querySelector('.details');
+    if (parent.firstChild) {
+      parent.classList.toggle('hidden');
+      return;
+    }
+    let diff = document.createElement('iframe');
+    diff.src = 'layout-test-results/' + item.path.replace(/\.\w+$/, '-pretty-diff.html');
+    parent.appendChild(diff);
+    if (item.hasTextDump && !item.matches) {
+      let diff = document.createElement('iframe');
+      diff.src = 'layout-test-results/normalized/' + item.path.replace(/\.\w+$/, '-diff.txt');
+      parent.appendChild(diff);
+    }
+  }
+}
+let results = new Results;
+results.render();
+</script>
+</body>
