@@ -281,6 +281,10 @@ class TestResultTypes {
     return this.types.length == 1 && this.types[0] == type;
   }
 
+  has(type) {
+    return this.types.includes(type);
+  }
+
   get shouldNotUpdate() {
     return this.types.length == 1 &&
         (this.types[0] == 'Skip' ||
@@ -448,8 +452,13 @@ class TestExpectation {
         return false;
       let parent = testExpectations.parentExpectation(this.path);
       if (parent) {
-        log(`  Leave ${this.path} ${this.expectations} because its parent is ${parent}`);
-        return false;
+        let parentExpectations = parent.expectations;
+        if (parentExpectations.is('Skip') || parentExpectations.has('Pass')) {
+          log(`  Can remove ${this.path} because parent's expectations are ${parentExpectations}`);
+        } else {
+          log(`  Leave ${this.path} ${this.expectations} because its parent is ${parent}`);
+          return false;
+        }
       }
     } else {
       return false;

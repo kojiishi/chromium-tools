@@ -96,6 +96,18 @@ describe('TestResultTypes', function() {
     assert.deepEqual(new TestResultTypes(" a b ").types, ['a', 'b']);
     assert.deepEqual(new TestResultTypes(['a', 'b']).types, ['a', 'b']);
   });
+  it('is', function () {
+    assert.equal(new TestResultTypes().is('Pass'), false);
+    assert.equal(new TestResultTypes(['Pass']).is('Pass'), true);
+    assert.equal(new TestResultTypes(['Pass', 'Failure']).is('Pass'), false);
+    assert.equal(new TestResultTypes(['Failure', 'Pass']).is('Pass'), false);
+  });
+  it('has', function () {
+    assert.equal(new TestResultTypes().has('Pass'), false);
+    assert.equal(new TestResultTypes(['Pass']).has('Pass'), true);
+    assert.equal(new TestResultTypes(['Pass', 'Failure']).has('Pass'), true);
+    assert.equal(new TestResultTypes(['Failure', 'Pass']).has('Pass'), true);
+  });
   it('failureExtensions', function () {
     assert.deepEqual(Array.from(new TestResultTypes([]).failureExtensions()),
                      []);
