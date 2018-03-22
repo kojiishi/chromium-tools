@@ -188,6 +188,48 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   addHintDir(dir) {
     this.hintDir = dir;
   }
+
+  async checkPng(file) {
+    let code = await new Promise((resolve, reject) => {
+      let child = child_process.spawn('pngcheck', [file]);
+      child.stdout.on('data', (data) => log(data.toString()));
+      child.on('close', (code) => {
+        resolve(code)
+      });
+    });
+    return code === 0;
+  }
+
+  async download(url, dest) {
+    log(`Downloading from ${url}`);
+    let body;
+    for (let retry = 0; ; retry++) {
+      try {
+        body = await rp(url, {encoding: null});
+      } catch (error) {
+        if (retry < 3 && error.statusCode && error.statusCode >= 500) {
+          log.warn(`Retrying ${retry} from ${url}: ${error}`);
+          await sleep(1000);
+          continue;
+        }
+        throw error;
+      }
+      await fs.outputFile(dest, body);
+      if (dest.endsWith('.png')) {
+        let result = await this.checkPng(dest);
+        if (!result) {
+          if (retry < 3) {
+            log.warn(`Retrying ${retry} from ${url}: Invalid PNG`);
+            continue;
+          }
+          await fs.unlink(dest);
+          throw new Error(`Invalid PNG ${url}`)
+        }
+      }
+      break;
+    }
+    log(`Download completed from ${url}`);
+  }
 }
 
 function argAsArray(arg) {
@@ -220,26 +262,6 @@ function isIterator(obj) {
 
 function sleep(ms){
   return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function downloadUrl(url, dest) {
-  log(`Downloading from ${url}`);
-  let body;
-  for (let retry = 0; ; ) {
-    try {
-      body = await rp(url);
-      break;
-    } catch (error) {
-      if (++retry > 3)
-        throw error;
-      if (error.statusCode && error.statusCode < 500)
-        throw error;
-      log.warn(`${error}\nRetrying ${retry} from ${url}`);
-      await sleep(1000);
-    }
-  }
-  await fs.outputFile(dest, body);
-  log(`Download completed from ${url}`);
 }
 
 class TestResultTypes {
@@ -657,7 +679,7 @@ class TestResult {
     for (let download of this.rebaselineDataFromActual(actuals)) {
       let source = results.sourceDir + download.source;
       let dest = path.join(results.rebaselineDir, download.dest);
-      downloads.push(downloadUrl(source, dest)
+      downloads.push(options.download(source, dest)
 		     .then(() => log.files.push(dest)));
     }
     let task = Promise.all(downloads)
@@ -690,7 +712,7 @@ class TestResults {
       sourcePath = options.testResultsUrl(build);
       file = path.join(process.env.HOME, 'ng-bot', build + '.json');
       if (!fs.existsSync(file)) {
-        await downloadUrl(sourcePath, file);
+        await options.download(sourcePath, file);
       }
     }
 

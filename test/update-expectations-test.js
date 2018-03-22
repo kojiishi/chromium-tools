@@ -80,6 +80,11 @@ describe('Options', function () {
                      ['LayoutTests/flag-specific/a',
                       'LayoutTests']);
   });
+  it('checkPng', async function () {
+    assert.equal(await options.checkPng(path.join(__dirname, '1x1.png')), true);
+    assert.equal(await options.checkPng(__filename), false);
+    assert.equal(await options.checkPng(path.join(__dirname, 'not-exist')), false);
+  });
 });
 
 describe('TestResultTypes', function() {
