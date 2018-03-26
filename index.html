@@ -27,24 +27,36 @@ const chart_loader = new Promise((resolve, reject) => {
 });
 
 class Data {
-  constructor(url) {
-    this.rs = fetch(url);
+  constructor() {
+    this.data = {
+      failure: fetch('data/by_failure.json'),
+      dir: fetch('data/by_dir.json'),
+    };
   }
 
-  async dataTable() {
-    if (this.dataTable_)
-      return this.dataTable_;
-    let rs = await this.rs;
-    let json = await rs.json();
-    await chart_loader;
-    this.dataTable_ = google.visualization.arrayToDataTable(json);
-    return this.dataTable_;
+  get minDate() {
+    if (document.getElementById('hasMinDate').checked)
+      return document.getElementById('minDate').value;
+    return null;
   }
 
-  async data() {
-    let data = await this.dataTable();
-    if (document.getElementById('hasMinDate').checked) {
-      let filters = [{column: 0, minValue: document.getElementById('minDate').value}];
+  async dataArray(id) {
+    let data = this.data[id];
+    if (Array.isArray(data))
+      return data;
+    let rs = await data;
+    data = await rs.json();
+    console.assert(Array.isArray(data));
+    this.data[id] = data;
+    return data;
+  }
+
+  async dataTable(id) {
+    let data = await this.dataArray(id);
+    data = google.visualization.arrayToDataTable(data);
+    let minDate = this.minDate;
+    if (minDate) {
+      let filters = [{column: 0, minValue: minDate}];
       data = new google.visualization.DataView(data);
       data.setRows(data.getFilteredRows(filters));
     }
@@ -73,7 +85,7 @@ class Data {
   async draw(id, title, idTable) {
     let element = document.getElementById(id);
     let renderer = new google.visualization.AreaChart(element);
-    let data = await this.data();
+    let data = await this.dataTable(id);
     renderer.draw(data, {
       isStacked: true,
       title: title,
@@ -85,13 +97,12 @@ class Data {
   }
 }
 
-const by_failure = new Data('data/by_failure.json');
-const by_dir = new Data('data/by_dir.json');
+const data = new Data();
 
 async function drawCharts() {
   await chart_loader;
-  await by_failure.draw('failure', 'Failure types');
-  await by_dir.draw('dir', 'Directories', 'table');
+  await data.draw('failure', 'Failure types');
+  await data.draw('dir', 'Directories', 'table');
 }
 
 window.addEventListener('load', drawCharts);
