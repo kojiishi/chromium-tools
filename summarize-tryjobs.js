@@ -59,7 +59,7 @@ async function run() {
   for (let row of by_failures)
     row[0] = row[0].toISOString().slice(0, 10);
   by_failures.splice(0, 0, ['Date', 'Crash', 'Timeout', 'Image', 'Image+Text', 'Text']);
-  await fs.outputJson('by_failure.json', by_failures);
+  await fs.outputJson('by_failure.json', by_failures, {spaces: '\t'});
 
   // Get the list of directory name in the descending order of failures.
   let dirs = {};
@@ -92,7 +92,7 @@ async function run() {
   });
   dirs.splice(0, 0, 'date');
   by_dirs.splice(0, 0, dirs);
-  await fs.outputJson('by_dir.json', by_dirs);
+  await fs.outputJson('by_dir.json', by_dirs, {spaces: '\t'});
 }
 
 function increment(dict, key, value = 1) {
