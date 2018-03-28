@@ -45,6 +45,7 @@ class Summarizer {
     let datetime = new Date(results.seconds_since_epoch * 1000);
     log(`${results.build_number} ${datetime.toISOString()}`);
     results = new TestResults(results);
+    let flag = results.flag;
     let by_type = {};
     let by_dir = {};
     let base_failures = [];
@@ -54,7 +55,7 @@ class Summarizer {
       let failure = actuals.severestFailure;
       if (!failure)
         continue;
-      if (!result.isFlagSpecificFailure) {
+      if (flag && !result.isFlagSpecificFailure) {
         debug(`Ignored due to failure in base: ${result.path}`);
         base_failures.push(result.path);
         continue;
@@ -71,7 +72,10 @@ class Summarizer {
       let dir = path.split('/')[0];
       increment(by_dir, dir);
     }
-    log(`${failures} failures, ${base_failures.length} ignored due to failures in base.`);
+    if (flag)
+      log(`${failures} failures, ${base_failures.length} ignored due to failures in base.`);
+    else
+      log(`${failures} failures`);
     return [datetime, by_type, by_dir];
   }
 

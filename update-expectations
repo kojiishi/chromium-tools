@@ -869,6 +869,11 @@ class TestResults {
     return null;
   }
 
+  get flag() {
+    // JSON has a leading '/', remove it.
+    let flag = this.data.flag_name;
+    return flag ? flag.trimLeft('/') : null;
+  }
 
   get testRootDir() {
     if (this._testRootDir)
