@@ -108,6 +108,19 @@ describe('TestResultTypes', function() {
     assert.equal(new TestResultTypes(['Pass', 'Failure']).has('Pass'), true);
     assert.equal(new TestResultTypes(['Failure', 'Pass']).has('Pass'), true);
   });
+  it('hasFailure', function () {
+    assert.equal(new TestResultTypes().hasFailure, false);
+    assert.equal(new TestResultTypes(['Pass']).hasFailure, false);
+    assert.equal(new TestResultTypes(['Pass', 'Failure']).hasFailure, true);
+    assert.equal(new TestResultTypes(['Failure', 'Pass']).hasFailure, true);
+  });
+  it('severestFailure', function () {
+    assert.equal(new TestResultTypes().severestFailure, null);
+    assert.equal(new TestResultTypes(['PASS']).severestFailure, null);
+    assert.equal(new TestResultTypes(['PASS', 'CRASH']).severestFailure, 'CRASH');
+    assert.equal(new TestResultTypes(['IMAGE+TEXT', 'CRASH']).severestFailure, 'CRASH');
+    assert.equal(new TestResultTypes(['PASS', 'IMAGE+TEXT']).severestFailure, 'IMAGE+TEXT');
+  });
   it('failureExtensions', function () {
     assert.deepEqual(Array.from(new TestResultTypes([]).failureExtensions()),
                      []);

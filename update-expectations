@@ -256,6 +256,14 @@ function *filter(iterable, predicate) {
   }
 }
 
+function any(iterable, predicate) {
+  for (let i of iterable) {
+    if (predicate(i))
+      return true;
+  }
+  return false;
+}
+
 function isIterator(obj) {
   return typeof obj[Symbol.iterator] === 'function';
 }
@@ -285,6 +293,51 @@ class TestResultTypes {
     return this.types.includes(type);
   }
 
+  static toSeverity(type) {
+    switch (type) {
+      case 'CRASH':
+      case 'Crash':
+        return 6;
+      case 'TIMEOUT':
+      case 'Timeout':
+        return 5;
+      case 'IMAGE+TEXT':
+        return 4;
+      case 'IMAGE':
+        return 3;
+      case 'TEXT':
+        return 2;
+      case 'FAIL':
+      case 'Failure':
+        return 1;
+      case 'MISSING':
+      case 'PASS':
+      case 'SKIP':
+      case 'SLOW':
+      case 'Missing':
+      case 'Pass':
+      case 'Skip':
+        return 0;
+      default:
+        assert(false, `Unexpected type ${type} in ${this.toString()}`);
+    }
+  }
+
+  get hasFailure() {
+    return any(this.types.map(TestResultTypes.toSeverity),
+               severity => severity);
+  }
+
+  get severestFailure() {
+    let types = this.types
+      .map(type => [TestResultTypes.toSeverity(type), type])
+      .filter(r => r[0]);
+    if (!types.length)
+      return null;
+    types.sort((a, b) => b[0] - a[0]);
+    return types[0][1];
+  }
+
   get shouldNotUpdate() {
     return this.types.length == 1 &&
         (this.types[0] == 'Skip' ||
@@ -292,27 +345,31 @@ class TestResultTypes {
          this.types[0] == 'NeedsManualRebaseline');
   }
 
+  static toExpectation(actual) {
+    switch (actual) {
+      case 'PASS':
+        return 'Pass';
+      case 'IMAGE':
+      case 'TEXT':
+      case 'IMAGE+TEXT':
+        return 'Failure';
+      case 'CRASH':
+        return 'Crash';
+      case 'TIMEOUT':
+        return 'Timeout';
+      case 'MISSING':
+        return 'Skip';
+      case 'SKIP':
+        return null;
+      default:
+        throw new Error(`Unknown actual ${actual}`);
+    }
+  }
+
   toExpectations() {
-    return new TestResultTypes(this.types.map(actual => {
-      switch (actual) {
-        case 'PASS':
-          return 'Pass';
-        case 'IMAGE':
-        case 'TEXT':
-        case 'IMAGE+TEXT':
-          return 'Failure';
-        case 'CRASH':
-          return 'Crash';
-        case 'TIMEOUT':
-          return 'Timeout';
-        case 'MISSING':
-          return 'Skip';
-        case 'SKIP':
-          return null;
-        default:
-          throw new Error(`Unknown actual ${actual}`);
-      }
-    }).filter(expect => expect != null));
+    return new TestResultTypes(this.types
+        .map(TestResultTypes.toExpectation)
+        .filter(expect => expect != null));
   }
 
   *failureExtensions() {
@@ -650,6 +707,18 @@ class TestResult {
     return new TestResultTypes(this.result.actual);
   }
 
+  get isFlagSpecificFailure() {
+    let flagExpectations = this.result.flag_expectations;
+    if (!flagExpectations)
+      return false;  // not in FlagExpectations.
+    let baseExpectations = this.result.base_expectations;
+    if (!baseExpectations)
+      return true;  // only in FlagExpectations.
+    baseExpectations = new TestResultTypes(baseExpectations);
+    assert(baseExpectations.length, this.path);
+    return !baseExpectations.hasFailure;
+  }
+
   get textMismatchCategory() {
     return this.result.text_mismatch;
   }
@@ -678,7 +747,8 @@ class TestResult {
       return false;
     }
     let testPath = path.parse(this.path);
-    let refPath = path.join(results.testRootDir, testPath.dir, testPath.name + '-expected' + testPath.ext);
+    let refPath = path.join(results.testRootDir, testPath.dir,
+                            testPath.name + '-expected' + testPath.ext);
     if (fs.existsSync(refPath)) {
       log.warn(`  Ignore rebaseline of ref test: ${this.path}`);
       return false;
@@ -691,14 +761,13 @@ class TestResult {
       downloads.push(options.download(source, dest)
 		     .then(() => log.files.push(dest)));
     }
-    let task = Promise.all(downloads)
-	.then(() => {
-	  let expectation = expectations.expectation(this.path);
-	  if (expectation)
-	    expectation.remove();
-	  else
-            log.warn(`Expectation for ${this.path} not found in ${expectations.path}`);
-	});
+    let task = Promise.all(downloads).then(() => {
+      let expectation = expectations.expectation(this.path);
+      if (expectation)
+        expectation.remove();
+      else
+        log.warn(`Expectation for ${this.path} not found in ${expectations.path}`);
+    });
     async_tasks.push(task);
     return true;
   }
