@@ -136,6 +136,7 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
           return false;
         };
       }
+      args = args.map(l => l.trim());
       let byPath = arrayToDict(args);
       return result => result.path in byPath;
     })(await Options.argAsArrayWithFile(this.rebaseline));
