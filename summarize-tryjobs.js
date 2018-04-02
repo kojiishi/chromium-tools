@@ -28,7 +28,8 @@ class Summarizer {
 
       rows.push(this.rowFromJson(results));
     }
-    await fs.outputFile('intraday.txt', intradays.join('\n') + '\n')
+    if (intradays.length)
+      await fs.outputFile('intraday.txt', intradays.join('\n') + '\n')
 
     rows.sort((a, b) => a[0] - b[0]);
     for (let row of rows)
@@ -68,6 +69,7 @@ class Summarizer {
           .replace(/^external\/wpt\/css\/CSS2\//, '')
           .replace(/^external\/wpt\/css\//, '')
           .replace(/^external\/wpt\//, '')
+          .replace(/^http\/tests\//, '')
           .replace(/^virtual\//, '');
       let dir = path.split('/')[0];
       increment(by_dir, dir);

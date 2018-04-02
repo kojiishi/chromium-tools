@@ -155,7 +155,7 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   static async argAsArrayWithFile(arg) {
     if (arg === '-')
       return await Options.readLinesFromStdin();
-    return Option.argAsArray(arg);
+    return Options.argAsArray(arg);
   }
 
   static readLinesFromStdin() {
