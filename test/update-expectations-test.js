@@ -68,17 +68,17 @@ describe('Options', function () {
     });
   });
 
-  it('baselineDir', function () {
-    assert.deepEqual(Array.from(options.baselineDirs(null, null, 'LayoutTests')),
-                     ['LayoutTests']);
-    assert.deepEqual(Array.from(options.baselineDirs([], [], 'LayoutTests')),
-                     ['LayoutTests']);
-    assert.deepEqual(Array.from(options.baselineDirs(['a', 'b'], null, 'LayoutTests')),
-                     ['LayoutTests/platform/a', 'LayoutTests/platform/b',
-                      'LayoutTests']);
-    assert.deepEqual(Array.from(options.baselineDirs(null, ['a'], 'LayoutTests')),
-                     ['LayoutTests/flag-specific/a',
-                      'LayoutTests']);
+  it('baselineDirs', function () {
+    assert.deepEqual(Array.from(options.baselineDirs(null, null)),
+                     ['']);
+    assert.deepEqual(Array.from(options.baselineDirs([], [])),
+                     ['']);
+    assert.deepEqual(Array.from(options.baselineDirs(['a', 'b'], null)),
+                     ['platform/a', 'platform/b',
+                      '']);
+    assert.deepEqual(Array.from(options.baselineDirs(null, ['a'])),
+                     ['flag-specific/a',
+                      '']);
   });
   it('checkPng', async function () {
     assert.equal(await options.checkPng(path.join(__dirname, '1x1.png')), true);

@@ -22,6 +22,8 @@
     "minimist": "^1.2.0"
   },
   "dependencies": {
+    "filecompare": "^1.0.4",
+    "glob": "^7.1.2",
     "request": "^2.83.0",
     "request-promise-native": "^1.0.5"
   }

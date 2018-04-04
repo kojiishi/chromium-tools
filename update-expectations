@@ -208,18 +208,20 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
     yield path.join(this.testRootDir, 'TestExpectations');
   }
 
-  *baselineDirs(platforms, flags, testRootDir = this.testRootDir) {
+  *baselineDirs(platforms, flags) {
     if (flags) {
-      let flagDir = path.join(testRootDir, 'flag-specific');
+      if (!Array.isArray(flags))
+        flags = [flags];
+      let flagDir = 'flag-specific';
       for (let flag of flags)
         yield path.join(flagDir, flag);
     }
     if (platforms) {
-      let platformDir = path.join(testRootDir, 'platform');
+      let platformDir = 'platform';
       for (let platform of platforms)
         yield path.join(platformDir, platform);
     }
-    yield testRootDir;
+    yield '';
   }
 
   addHintDir(dir) {
@@ -281,6 +283,11 @@ function *filter(iterable, predicate) {
     if (predicate(i))
       yield i;
   }
+}
+
+function *map(iterable, func) {
+  for (let i of iterable)
+    yield func(i);
 }
 
 function any(iterable, predicate) {
@@ -884,7 +891,8 @@ class TestResults {
   }
 
   baselineDirs(platforms, flags) {
-    return options.baselineDirs(platforms, flags, this.testRootDir);
+    return map(options.baselineDirs(platforms, flags),
+               dir => path.join(this.testRootDir, dir));
   }
 
   baseline(filePath, platforms, flags) {

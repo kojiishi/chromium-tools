@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+'use strict';
+const fc_cb = require('filecompare');
+const fs = require('fs-extra');
+const glob_cb = require('glob');
+const Options = require('./update-expectations').Options;
+const options = new Options();
+const path = require('path');
+
+let out = console.log.bind(console);
+let log = console.error.bind(console);
+
+const fc = (path1, path2) => {
+  return new Promise((resolve, reject) => {
+    fc_cb(path1, path2, isEqual => resolve(isEqual));
+  });
+};
+
+const glob = (pattern, options) => {
+  return new Promise((resolve, reject) => {
+    glob_cb(pattern, options, (err, files) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(files);
+    });
+  });
+};
+
+async function run() {
+  let testRootDir = options.testRootDir;
+  let dirs = Array.from(options.baselineDirs(
+                        ['linux', 'win'],
+                        ['enable-blink-features=LayoutNG']));
+  let baselineDir = dirs[0];
+  dirs = dirs.slice(1);
+  log(`Checking ${baselineDir} against ${dirs.join(', ')}`);
+  baselineDir = path.join(testRootDir, baselineDir);
+  let count = 0;
+  for (let file of await glob('**/*', {cwd: baselineDir})) {
+    let baseline = path.join(baselineDir, file);
+    for (let dir of dirs) {
+      let parent = path.join(testRootDir, dir, file);
+      if (await fs.pathExists(parent)) {
+        if (await fc(baseline, parent)) {
+          log(`${file} match to ${dir || 'generic'}`);
+          out(path.join(baselineDir, file));
+          count++;
+          break;
+        }
+        // If non-matching expectation file is found in the chain,
+        // don't look up further. This is the expectation file
+        // bot would use if we remove the first one.
+        // log(`${file} non-matching file found in ${dir || 'generic'}`);
+        break;
+      }
+    }
+  }
+  log(`${count} matches found`);
+}
+
+run().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
