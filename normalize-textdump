@@ -72,6 +72,7 @@ class TextRun {
 
   toString() {
     let width = '###';
+    this.x = '###';
     return `${this.leading}text run at (${this.x},${this.y}) width ${width}: "${this.text.trimRight()}"`;
   }
 
@@ -122,7 +123,8 @@ class TextDump {
       }
       let box = Box.parse(line);
       if (box) {
-        if (box.name === 'LayoutText') {
+        if (box.name === 'LayoutText' || box.name === 'LayoutInline') {
+          box.x = '###';
           box.width = '###';
         } else if (box.name === 'LayoutBR') {
           box.x = box.y = box.width = box.height = '###';
