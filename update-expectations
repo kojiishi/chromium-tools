@@ -199,7 +199,7 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   }
 
   get testRootDir() {
-    return path.join(this.webKitDir, 'LayoutTests');
+    return path.resolve(this.webKitDir, '../WebKit/LayoutTests');
   }
 
   *testExpectationsPaths() {
