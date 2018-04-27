@@ -995,7 +995,15 @@ async function run(args) {
   args = TestResults.loadArgs(args);
   let messages = [];
   for (let results of args) {
-    results = await results;
+    try {
+      results = await results;
+    } catch (e) {
+      if (e.statusCode === 404) {
+        log.warn(`404 ${e.statusMessage} ignored: ${e}`);
+        continue;
+      }
+      throw e;
+    }
     if (options.shouldRebaseline) {
       results.rebaseline(expectations);
     } else if (options.deflake) {

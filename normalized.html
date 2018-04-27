@@ -25,6 +25,7 @@ iframe {
 class Results {
   constructor() {
     this.rs = fetch('layout-test-results/normalized/normalized.json');
+    this.openElements = [];
   }
 
   async items() {
@@ -72,9 +73,16 @@ class Results {
   onClickItem(item, row) {
     let parent = row.querySelector('.details');
     if (parent.firstChild) {
-      parent.classList.toggle('hidden');
+      if (parent.classList.contains('hidden')) {
+        this.hideAllDetails();
+        parent.classList.remove('hidden');
+        this.openElements.push(parent);
+      } else {
+        parent.classList.add('hidden');
+      }
       return;
     }
+    this.hideAllDetails();
     let diff = document.createElement('iframe');
     diff.src = 'layout-test-results/' + item.path.replace(/\.\w+$/, '-pretty-diff.html');
     parent.appendChild(diff);
@@ -83,6 +91,13 @@ class Results {
       diff.src = 'layout-test-results/normalized/' + item.path.replace(/\.\w+$/, '-diff.txt');
       parent.appendChild(diff);
     }
+    this.openElements.push(parent);
+  }
+
+  hideAllDetails() {
+    for (let element of this.openElements)
+      element.classList.add('hidden');
+    this.openElements = [];
   }
 }
 let results = new Results;
