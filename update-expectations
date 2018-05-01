@@ -483,6 +483,10 @@ class TestExpectation {
     return output.join(' ') + (this.trailing ? this.trailing : '');
   }
 
+  shouldSkipWrite() {
+    return this.isRemoved || !this.expectations.length;
+  }
+
   remove() {
     assert(!this.isRemoved);
     this.isRemoved = true;
@@ -597,7 +601,7 @@ class TestExpectations {
     let lines = this.lines
       .filter(test =>
         !TestExpectation.isTestExpectation(test) ||
-        !test.isRemoved);
+        !test.shouldSkipWrite());
     fs.writeFileSync(this.path, lines.join('\n') + '\n', 'utf8');
   }
 
