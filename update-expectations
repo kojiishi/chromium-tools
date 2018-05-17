@@ -392,7 +392,6 @@ class TestResultTypes {
       case 'TIMEOUT':
         return 'Timeout';
       case 'MISSING':
-        return 'Skip';
       case 'SKIP':
         return null;
       default:
