@@ -540,25 +540,37 @@ class TestExpectation {
   removeIfNeeded(testExpectations, originalExpectations) {
     if (!this.expectations.length) {
       // Remove if no expectations.
-    } else if (this.expectations.is('Pass')) {
-      // Don't remove '[ Pass ]', if it's to override parent expectations files.
-      if (!testExpectations)
-        return false;
-      let parent = testExpectations.parentExpectation(this.path);
-      if (parent) {
-        let parentExpectations = parent.expectations;
-        if (parentExpectations.is('Skip') || parentExpectations.has('Pass')) {
-          log(`  Can remove ${this.path} because parent's expectations are ${parentExpectations}`);
-        } else {
-          log(`  Leave ${this.path} ${this.expectations} because its parent is ${parent}`);
-          return false;
-        }
-      }
+    } else if (testExpectations && this.isSubsetOfParents(testExpectations)) {
+      // Remove if this is a subset of parent expectations.
     } else {
       return false;
     }
     log(`  Removing ${this.path} ${originalExpectations || this.expectations} with ${this.actuals}`);
     this.remove();
+    return true;
+  }
+
+  isSubsetOfParents(testExpectations) {
+    let parent = testExpectations.parentExpectation(this.path);
+    if (!parent) {
+      if (this.expectations.is('Pass')) {
+        log(`  Removing ${this.path} ${this.expectations} because no parents`);
+        return true;
+      }
+      return false;
+    }
+    let parentExpectations = parent.expectations;
+    if (parentExpectations.is('Skip')) {
+      log(`  Remove ${this.path} ${this.expectations} because parent is ${parentExpectations}`);
+      return true;
+    }
+    for (let expectation of this.expectations) {
+      if (!parentExpectations.has(expectation)) {
+        log(`  Leave ${this.path} ${this.expectations} because parent is ${parentExpectations}`);
+        return false;
+      }
+    }
+    log(`  Removing ${this.path} ${this.expectations} because parent is ${parentExpectations}`);
     return true;
   }
 
