@@ -472,6 +472,15 @@ class TestExpectation {
     return !this.shouldNotUpdate && options.shouldUpdate(this.path);
   }
 
+  conditionsHas(condition) {
+    if (!this.conditions)
+      return true;
+    let conditions = this.conditions.split(' ');
+    return conditions.includes(condition) ||
+        // TODO: How are Release/Debug evaludated? For now, just take it safe.
+        conditions.includes('Release') || conditions.includes('Debug');
+  }
+
   toString() {
     if (this.isRemoved)
       return null;
@@ -555,6 +564,13 @@ class TestExpectation {
     if (!parent) {
       if (this.expectations.is('Pass')) {
         log(`  Removing ${this.path} ${this.expectations} because no parents`);
+        return true;
+      }
+      return false;
+    }
+    if (!parent.conditionsHas('Linux')) {
+      if (this.expectations.is('Pass')) {
+        log(`  Removing ${this.path} ${this.expectations} because parent is [${parent.conditions}] ${parent.expectations}`);
         return true;
       }
       return false;
