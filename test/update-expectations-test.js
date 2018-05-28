@@ -5,6 +5,7 @@ const target = require('../update-expectations');
 const parseArgs = target.parseArgs;
 const setArgs = target.setArgs;
 const Options = target.Options;
+const StringList = target.StringList;
 const TestExpectation = target.TestExpectation;
 const TestResult = target.TestResult;
 const TestResults = target.TestResults;
@@ -87,14 +88,32 @@ describe('Options', function () {
   });
 });
 
+describe('StringList', function() {
+  it('push', function () {
+    let list = new StringList([1, 2]);
+    list.push(5);
+    assert.deepEqual(list.items, [1, 2, 5]);
+  });
+  it('push-array', function () {
+    let list = new StringList([1, 2]);
+    list.push([5, 6]);
+    assert.deepEqual(list.items, [1, 2, 5, 6]);
+  });
+  it('push-list', function () {
+    let list = new StringList([1, 2]);
+    list.push(new StringList([5, 6]));
+    assert.deepEqual(list.items, [1, 2, 5, 6]);
+  });
+});
+
 describe('TestResultTypes', function() {
   it('ctor', function () {
-    assert.deepEqual(new TestResultTypes().types, []);
-    assert.deepEqual(new TestResultTypes("").types, []);
-    assert.deepEqual(new TestResultTypes(" ").types, []);
-    assert.deepEqual(new TestResultTypes("a b").types, ['a', 'b']);
-    assert.deepEqual(new TestResultTypes(" a b ").types, ['a', 'b']);
-    assert.deepEqual(new TestResultTypes(['a', 'b']).types, ['a', 'b']);
+    assert.deepEqual(new TestResultTypes().items, []);
+    assert.deepEqual(new TestResultTypes("").items, []);
+    assert.deepEqual(new TestResultTypes(" ").items, []);
+    assert.deepEqual(new TestResultTypes("a b").items, ['a', 'b']);
+    assert.deepEqual(new TestResultTypes(" a b ").items, ['a', 'b']);
+    assert.deepEqual(new TestResultTypes(['a', 'b']).items, ['a', 'b']);
   });
   it('is', function () {
     assert.equal(new TestResultTypes().is('Pass'), false);
@@ -172,7 +191,7 @@ describe('TestResult', function() {
     });
     assert.deepEqual(
         result.actuals.toExpectations().toArray(),
-        [ 'Pass', 'Failure', 'Failure', 'Failure', 'Crash', 'Timeout', 'Skip' ]);
+        [ 'Pass', 'Failure', 'Failure', 'Failure', 'Crash', 'Timeout' ]);
   });
 
   [

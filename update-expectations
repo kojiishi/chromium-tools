@@ -206,6 +206,8 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
     if (this.flag)
       yield path.join(this.testRootDir, 'FlagExpectations', this.flag);
     yield path.join(this.testRootDir, 'TestExpectations');
+    yield path.join(this.testRootDir, 'SlowTests');
+    yield path.join(this.testRootDir, 'NeverFixTests');
   }
 
   *baselineDirs(platforms, flags) {
@@ -306,25 +308,51 @@ function sleep(ms){
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-class TestResultTypes {
+class StringList {
+  constructor(items = []) {
+    if (!Array.isArray(items)) {
+      assert(typeof items === 'string' || items instanceof String);
+      items = items.trim().split(/\s+/).filter(t => t);
+    }
+    assert(Array.isArray(items));
+    this.items = items;
+  }
+
+  get length() { return this.items.length; }
+  [Symbol.iterator]() { return this.items[Symbol.iterator](); }
+  toArray() { return this.items; }
+  toString() { return '[ ' + this.items.join(' ') + ' ]'; }
+
+  is(item) {
+    return this.items.length == 1 && this.items[0] == item;
+  }
+
+  has(item) {
+    return this.items.includes(item);
+  }
+
+  isSubsetOf(other) {
+    for (let item of this.items) {
+      if (!other.has(item))
+        return false;
+    }
+    return true;
+  }
+
+  push(item) {
+    if (item instanceof StringList) {
+      item = item.items;
+    } else if (!Array.isArray(item)) {
+      this.items.push(item);
+      return;
+    }
+    Array.prototype.push.apply(this.items, item);
+  }
+}
+
+class TestResultTypes extends StringList {
   constructor(types = []) {
-    if (Array.isArray(types))
-      this.types = types;
-    else
-      this.types = types.trim().split(/\s+/).filter(t => t);
-  }
-
-  get length() { return this.types.length; }
-  [Symbol.iterator]() { return this.types[Symbol.iterator](); }
-  toArray() { return this.types; }
-  toString() { return '[ ' + this.types.join(' ') + ' ]'; }
-
-  is(type) {
-    return this.types.length == 1 && this.types[0] == type;
-  }
-
-  has(type) {
-    return this.types.includes(type);
+    super(types);
   }
 
   static toSeverity(type) {
@@ -358,25 +386,25 @@ class TestResultTypes {
   }
 
   get hasFailure() {
-    return any(this.types.map(TestResultTypes.toSeverity),
+    return any(this.items.map(TestResultTypes.toSeverity),
                severity => severity);
   }
 
   get severestFailure() {
-    let types = this.types
+    let items = this.items
       .map(type => [TestResultTypes.toSeverity(type), type])
       .filter(r => r[0]);
-    if (!types.length)
+    if (!items.length)
       return null;
-    types.sort((a, b) => b[0] - a[0]);
-    return types[0][1];
+    items.sort((a, b) => b[0] - a[0]);
+    return items[0][1];
   }
 
   get shouldNotUpdate() {
-    return this.types.length == 1 &&
-        (this.types[0] == 'Skip' ||
-         this.types[0] == 'NeedsRebaseline' ||
-         this.types[0] == 'NeedsManualRebaseline');
+    return this.items.length == 1 &&
+        (this.items[0] == 'Skip' ||
+         this.items[0] == 'NeedsRebaseline' ||
+         this.items[0] == 'NeedsManualRebaseline');
   }
 
   static toExpectation(actual) {
@@ -400,13 +428,13 @@ class TestResultTypes {
   }
 
   toExpectations() {
-    return new TestResultTypes(this.types
+    return new TestResultTypes(this.items
         .map(TestResultTypes.toExpectation)
         .filter(expect => expect != null));
   }
 
   *failureExtensions() {
-    for (let actual of this.types) {
+    for (let actual of this.items) {
       for (let type of actual.split('+')) {
         switch (type) {
           case 'IMAGE':
@@ -422,17 +450,12 @@ class TestResultTypes {
     }
   }
 
-  push(types) {
-    assert(types instanceof TestResultTypes);
-    Array.prototype.push.apply(this.types, types.types);
-  }
-
   deflake(actuals) {
     assert(actuals instanceof TestResultTypes && actuals.length);
     actuals = new Set(actuals.toExpectations().toArray());
     if (!actuals.size)
       return; // Cannot deflake without actual results.
-    this.types = this.types.filter(e => actuals.has(e));
+    this.items = this.items.filter(e => actuals.has(e));
   }
 }
 
@@ -476,9 +499,7 @@ class TestExpectation {
     if (!this.conditions)
       return true;
     let conditions = this.conditions.split(' ');
-    return conditions.includes(condition) ||
-        // TODO: How are Release/Debug evaludated? For now, just take it safe.
-        conditions.includes('Release') || conditions.includes('Debug');
+    return conditions.includes(condition);
   }
 
   toString() {
@@ -516,16 +537,16 @@ class TestExpectation {
     if (!actuals || !actuals.length)
       return;
     let addCount = 0;
-    for (let expect of actuals.toExpectations().types) {
-      if (!(expect in statistics) || this.expectations.types.includes(expect))
+    for (let expect of actuals.toExpectations()) {
+      if (!(expect in statistics) || this.expectations.has(expect))
         continue;
       log(`  Adding ${expect} to ${this.path}`);
-      this.expectations.types.push(expect);
+      this.expectations.push(expect);
       statistics[expect]++;
       addCount++;
     }
     if (addCount) {
-      this.expectations.types.sort();
+      this.expectations.items.sort();
       statistics.LinesChanged++;
     }
   }
@@ -534,11 +555,11 @@ class TestExpectation {
     let actuals = this.actuals;
     if (!actuals || !actuals.length)
       return;
-    let before = this.expectations.types;
+    let before = this.expectations.items;
     this.expectations.deflake(actuals);
     if (this.removeIfNeeded(testExpectations, before))
       return;
-    let deflaked = this.expectations.types;
+    let deflaked = this.expectations.items;
     if (before.length === deflaked.length)
       return;
     log(`  Deflaking from ${before} to ${deflaked}: ${this.path}`);
@@ -560,34 +581,37 @@ class TestExpectation {
   }
 
   isSubsetOfParents(testExpectations) {
-    let parent = testExpectations.parentExpectation(this.path);
-    if (!parent) {
+    let ancestorsExepctations = new TestResultTypes;
+    for (let parent of testExpectations.parentExpectations(this.path)) {
+      if (!parent.conditionsHas('Linux')) {
+        continue;
+      }
+      // TODO: How are Release/Debug evaludated? For now, just take it safe.
+      if (parent.conditionsHas('Release') || parent.conditionsHas('Debug')) {
+        // log(`  Leave ${this.path} ${this.expectations} because parent is [${parent.conditions}] ${parent.expectations}`);
+        return false;
+      }
+      let parentExpectations = parent.expectations;
+      if (parentExpectations.is('Skip')) {
+        log(`  Remove ${this.path} ${this.expectations} because parent is ${parentExpectations}`);
+        return true;
+      }
+      ancestorsExepctations.push(parentExpectations);
+    }
+    if (ancestorsExepctations.length === 0) {
       if (this.expectations.is('Pass')) {
         log(`  Removing ${this.path} ${this.expectations} because no parents`);
         return true;
       }
+      // log(`  Leave ${this.path} ${this.expectations} because no parents`);
       return false;
     }
-    if (!parent.conditionsHas('Linux')) {
-      if (this.expectations.is('Pass')) {
-        log(`  Removing ${this.path} ${this.expectations} because parent is [${parent.conditions}] ${parent.expectations}`);
-        return true;
-      }
-      return false;
-    }
-    let parentExpectations = parent.expectations;
-    if (parentExpectations.is('Skip')) {
-      log(`  Remove ${this.path} ${this.expectations} because parent is ${parentExpectations}`);
+    if (this.expectations.isSubsetOf(ancestorsExepctations)) {
+      log(`  Removing ${this.path} ${this.expectations} because parent is ${ancestorsExepctations}`);
       return true;
     }
-    for (let expectation of this.expectations) {
-      if (!parentExpectations.has(expectation)) {
-        log(`  Leave ${this.path} ${this.expectations} because parent is ${parentExpectations}`);
-        return false;
-      }
-    }
-    log(`  Removing ${this.path} ${this.expectations} because parent is ${parentExpectations}`);
-    return true;
+    log(`  Leave ${this.path} ${this.expectations} because parent is ${ancestorsExepctations}`);
+    return false;
   }
 
   exists(testRoot) {
@@ -658,6 +682,14 @@ class TestExpectations {
     if (expectation)
       return expectation;
     return parent.parentExpectation(testPath);
+  }
+
+  *parentExpectations(testPath) {
+    for (let parent = this.parent; parent; parent = parent.parent) {
+      let expectation = parent.expectation(testPath);
+      if (expectation)
+        yield expectation;
+    }
   }
 
   add(expectation) {
@@ -1105,6 +1137,7 @@ if (require.main === module) {
   module.exports.parseArgs = Options.parseArgs;
   module.exports.setArgs = args =>
       options = Options.parseArgs(args);
+  module.exports.StringList = StringList;
   module.exports.TestExpectation = TestExpectation;
   module.exports.TestExpectations = TestExpectations;
   module.exports.TestResult = TestResult;
