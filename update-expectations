@@ -582,7 +582,7 @@ class TestExpectation {
 
   isSubsetOfParents(testExpectations) {
     let ancestorsExepctations = new TestResultTypes;
-    for (let parent of testExpectations.parentExpectations(this.path)) {
+    for (let parent of testExpectations.parentTestExpectations(this.path)) {
       if (!parent.conditionsHas('Linux')) {
         continue;
       }
@@ -635,17 +635,26 @@ class TestExpectations {
   parse(inputText) {
     let lines = inputText.trimRight().split(/\r?\n/)
     let tests = [];
-    this.testByPath = {};
+    this.testsByPath = {};
     for (let line of lines) {
       let test = TestExpectation.parse(line);
       if (!test) {
         tests.push(line);
       } else {
         tests.push(test);
-        this.testByPath[test.path] = test;
+        this.onTestExpectationAdded(test);
       }
     }
     this.lines = tests;
+  }
+
+  onTestExpectationAdded(test) {
+    let path = test.path;
+    let list = this.testsByPath[path];
+    if (list)
+      list.push(test);
+    else
+      this.testsByPath[path] = [test];
   }
 
   write() {
@@ -656,14 +665,11 @@ class TestExpectations {
     fs.writeFileSync(this.path, lines.join('\n') + '\n', 'utf8');
   }
 
-  get expectations() {
+  testExpectations(testPath) {
+    if (testPath)
+      return this.testsByPath[testPath];
     return this.lines.filter(test =>
       TestExpectation.isTestExpectation(test) && !test.isRemoved);
-  }
-
-  expectation(testPath) {
-    assert(testPath);
-    return this.testByPath[testPath];
   }
 
   get parent() {
@@ -674,28 +680,18 @@ class TestExpectations {
     return null;
   }
 
-  parentExpectation(testPath) {
-    let parent = this.parent;
-    if (!parent)
-      return null;
-    let expectation = parent.expectation(testPath);
-    if (expectation)
-      return expectation;
-    return parent.parentExpectation(testPath);
-  }
-
-  *parentExpectations(testPath) {
+  *parentTestExpectations(testPath) {
     for (let parent = this.parent; parent; parent = parent.parent) {
-      let expectation = parent.expectation(testPath);
-      if (expectation)
-        yield expectation;
+      let expectations = parent.testExpectations(testPath);
+      if (expectations && expectations.length)
+        yield* expectations;
     }
   }
 
   add(expectation) {
     assert(TestExpectation.isTestExpectation(expectation) && !expectation.isRemoved);
     this.lines.push(expectation);
-    this.testByPath[expectation.path] = expectation;
+    this.onTestExpectationAdded(expectation);
     statistics.LinesAdded++;
   }
 
@@ -703,8 +699,14 @@ class TestExpectations {
     for (let result of results) {
       if (!result.shouldUpdate)
         continue;
-      let expectation = this.expectation(result.path);
-      if (!expectation) {
+      let expectations = this.testExpectations(result.path);
+      let expectation;
+      if (expectations && expectations.length) {
+        // TODO: Should consider conditions to find the appropriate entry.
+        // For now, we only update FlagExpectations, which has only one expectation
+        // for a path.
+        expectation = expectations[0];
+      } else {
         if (!addNew)
           continue;
         expectation = new TestExpectation(options.bug, result.path);
@@ -716,7 +718,7 @@ class TestExpectations {
 
   update() {
     log(`Updating expectations in ${this.path}...`);
-    for (let expectation of this.expectations) {
+    for (let expectation of this.testExpectations()) {
       if (expectation.shouldUpdate)
         expectation.update();
     }
@@ -724,7 +726,7 @@ class TestExpectations {
 
   deflake() {
     log(`De-flaking...`);
-    for (let expectation of this.expectations) {
+    for (let expectation of this.testExpectations()) {
       if (expectation.shouldUpdate)
         expectation.deflake(this);
     }
@@ -856,14 +858,14 @@ class TestResult {
       let source = results.sourceDir + download.source;
       let dest = path.join(results.rebaselineDir, download.dest);
       downloads.push(options.download(source, dest)
-		     .then(() => log.files.push(dest)));
+          .then(() => log.files.push(dest)));
     }
     let task = Promise.all(downloads).then(() => {
-      let expectation = expectations.expectation(this.path);
-      if (expectation)
-        expectation.remove();
-      else
+      let expectations = expectations.testExpectations(this.path);
+      if (!expectations)
         log.warn(`Expectation for ${this.path} not found in ${expectations.path}`);
+      else for (let expectation of expectations)
+        expectation.remove();
     });
     async_tasks.push(task);
     return true;
