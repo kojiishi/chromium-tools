@@ -833,7 +833,7 @@ class TestResult {
     }
   }
 
-  rebaseline(results, expectations) {
+  rebaseline(results, testExpectations) {
     if (!this.shouldRebaseline)
       return false;
     if (this.isRefTest) {
@@ -861,9 +861,9 @@ class TestResult {
           .then(() => log.files.push(dest)));
     }
     let task = Promise.all(downloads).then(() => {
-      let expectations = expectations.testExpectations(this.path);
+      let expectations = testExpectations.testExpectations(this.path);
       if (!expectations)
-        log.warn(`Expectation for ${this.path} not found in ${expectations.path}`);
+        log.warn(`Expectation for ${this.path} not found in ${testExpectations.path}`);
       else for (let expectation of expectations)
         expectation.remove();
     });
