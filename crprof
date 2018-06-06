@@ -1,0 +1,43 @@
+#!/bin/bash
+#
+# Profile Chromium renderer.
+#
+#PROGOUT=$(mktemp)
+PROGOUT=perf.prog
+PERFOUT=perf.perf
+PERFDATA=perf.data
+
+# Start Chromium.
+d r ++renderer-startup-dialog $* 2>&1 | tee $PROGOUT &
+
+# Wait for the renderer to be ready to start.
+while :; do
+  READY=$(grep 'paused waiting for debugger to attach. Send SIGUSR1 to unpause.' $PROGOUT)
+  if [[ -n $READY ]]; then
+    # PID in the message is always (1), find the PID from `ps`.
+    LINE=$(ps -aux | grep content_shell | grep 'type=renderer')
+    PID=$(echo $LINE | awk '{print $2}')
+    echo "PID=$PID (from $LINE)"
+    break
+  fi
+  echo "Waiting for renderer to startup"
+  sleep 1
+done
+
+# Start `perf`.
+echo "PID=$PID, starting perf..."
+perf record -g -F 1000 -p $PID -o $PERFDATA 2>&1 | tee $PERFOUT & kill -s SIGUSR1 $PID
+
+# Wait for `perf` to print the target has finished.
+while :; do
+  READY=$(grep '\[ perf record: Captured and wrote ' $PERFOUT)
+  if [[ -n $READY ]]; then
+    break
+  fi
+  echo "Waiting for finishing the program and perf data be ready"
+  sleep 1
+done
+
+#read -p "Hit Enter when done:" confirm
+rm -f $PROGOUT $PERFOUT
+(set -x; pprof -svg $OUT/content_shell $PERFDATA)
