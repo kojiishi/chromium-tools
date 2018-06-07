@@ -2,6 +2,15 @@
 #
 # Profile Chromium renderer.
 #
+function log {
+  echo "$*"
+}
+
+function log_status {
+  #echo -e "\e[s$*\eu"
+  echo -e "$*\e[A"
+}
+
 #PROGOUT=$(mktemp)
 PROGOUT=perf.prog
 PERFOUT=perf.perf
@@ -17,15 +26,15 @@ while :; do
     # PID in the message is always (1), find the PID from `ps`.
     LINE=$(ps -aux | grep content_shell | grep 'type=renderer')
     PID=$(echo $LINE | awk '{print $2}')
-    echo "PID=$PID (from $LINE)"
+    log "PID=$PID (from $LINE)"
     break
   fi
-  echo "Waiting for renderer to startup"
+  log_status "Waiting for renderer to startup"
   sleep 1
 done
 
 # Start `perf`.
-echo "PID=$PID, starting perf..."
+log "PID=$PID, starting perf..."
 perf record -g -F 1000 -p $PID -o $PERFDATA 2>&1 | tee $PERFOUT & kill -s SIGUSR1 $PID
 
 # Wait for `perf` to print the target has finished.
@@ -34,10 +43,11 @@ while :; do
   if [[ -n $READY ]]; then
     break
   fi
-  echo "Waiting for finishing the program and perf data be ready"
+  log_status "Waiting for finishing the program and perf data be ready"
   sleep 1
 done
 
 #read -p "Hit Enter when done:" confirm
 rm -f $PROGOUT $PERFOUT
 (set -x; pprof -svg $OUT/content_shell $PERFDATA)
+rm -f $PERFDATA
