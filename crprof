@@ -1,53 +1,70 @@
-#!/bin/bash
-#
-# Profile Chromium renderer.
-#
-function log {
-  echo "$*"
+#!/usr/bin/env node
+//
+// Profile Chromium renderer.
+//
+'use strict';
+const child_process = require('child_process');
+const fs = require('fs-extra');
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function log_status {
-  #echo -e "\e[s$*\eu"
-  echo -e "$*\e[A"
+async function findProcessId(re) {
+  while (true) {
+    let ps = child_process.execSync('ps -aux').toString().split('\n');
+    for (let line of ps) {
+      if (line.match(re))
+        return parseInt(line.split(/ +/)[1]);
+    }
+    await sleep(1000);
+  }
 }
 
-#PROGOUT=$(mktemp)
-PROGOUT=perf.prog
-PERFOUT=perf.perf
-PERFDATA=perf.data
+class ChildProcess {
+  constructor(command, args) {
+    this.stderrEvents = [];
+    let child = child_process.spawn(command, args, {
+      stdio: [process.stdin, process.stdout, 'pipe'],
+    });
+    child.stderr.on('data', (data) => this.fireStderr(data));
+    // child.on('close', (code) => this.fireClose(code));
+  }
 
-# Start Chromium.
-d r ++renderer-startup-dialog $* 2>&1 | tee $PROGOUT &
+  fireStderr(data) {
+    process.stderr.write(data);
+    data = data.toString();
+    for (let e of this.stderrEvents) {
+      if (data.includes(e[0])) {
+        e[1](data);
+      }
+    }
+  }
 
-# Wait for the renderer to be ready to start.
-while :; do
-  READY=$(grep 'paused waiting for debugger to attach. Send SIGUSR1 to unpause.' $PROGOUT)
-  if [[ -n $READY ]]; then
-    # PID in the message is always (1), find the PID from `ps`.
-    LINE=$(ps -aux | grep content_shell | grep 'type=renderer')
-    PID=$(echo $LINE | awk '{print $2}')
-    log "PID=$PID (from $LINE)"
-    break
-  fi
-  log_status "Waiting for renderer to startup"
-  sleep 1
-done
+  stderrHas(message) {
+    return new Promise((resolve, reject) => {
+      this.stderrEvents.push([message, resolve, reject]);
+    });
+  }
+}
 
-# Start `perf`.
-log "PID=$PID, starting perf..."
-perf record -g -F 1000 -p $PID -o $PERFDATA 2>&1 | tee $PERFOUT & kill -s SIGUSR1 $PID
+class Profiler {
+  async run() {
+    let args = process.argv.slice(2);
+    let target = new ChildProcess('d', ['r', '++renderer-startup-dialog'].concat(args));
+    let message = await target.stderrHas('paused waiting for debugger to attach. Send SIGUSR1 to unpause.');
+    let pid = await findProcessId(/content_shell.*type=renderer/);
 
-# Wait for `perf` to print the target has finished.
-while :; do
-  READY=$(grep '\[ perf record: Captured and wrote ' $PERFOUT)
-  if [[ -n $READY ]]; then
-    break
-  fi
-  log_status "Waiting for finishing the program and perf data be ready"
-  sleep 1
-done
+    console.log('### PID = ' + pid);
+    const perfdata = 'perf.data';
+    let perf = new ChildProcess('perf', ['record', '-g', '-F', '1000', '-p', pid, '-o', perfdata]);
+    process.kill(pid, 'SIGUSR1');
+    let done = await perf.stderrHas('[ perf record: Captured and wrote ');
 
-#read -p "Hit Enter when done:" confirm
-rm -f $PROGOUT $PERFOUT
-(set -x; pprof -svg $OUT/content_shell $PERFDATA)
-rm -f $PERFDATA
+    console.log('### PROCESS EXIT, generating profile: ' + done);
+    child_process.execSync(`(set -x; pprof -svg $OUT/content_shell ${perfdata})`, {stdio: 'inherit'});
+    await fs.unlink(perfdata);
+  }
+}
+
+new Profiler().run();
