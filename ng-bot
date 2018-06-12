@@ -60,7 +60,7 @@ args=()
 
 for arg in "$@"; do
   if [[ $arg == "try" ]]; then
-    git cl try -m tryserver.chromium.linux -b linux_layout_tests_layout_ng
+    git cl try -B luci.chromium.try -b linux_layout_tests_layout_ng
     exit
   fi
   if [[ $arg == up* ]]; then
@@ -81,7 +81,7 @@ Bug: $BUG
 EOF
     git cl upload --message-file=$MESSAGE_FILE
     rm $MESSAGE_FILE
-    git cl try -m tryserver.chromium.linux -b linux_layout_tests_layout_ng
+    git cl try -B luci.chromium.try -b linux_layout_tests_layout_ng
     exit
   fi
   args+=("$arg")
