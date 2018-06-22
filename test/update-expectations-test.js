@@ -104,6 +104,11 @@ describe('StringList', function() {
     list.push(new StringList([5, 6]));
     assert.deepEqual(list.items, [1, 2, 5, 6]);
   });
+  it('unique', function () {
+    let list = new StringList([1, 2, 1, 3]);
+    list.makeUnique();
+    assert.deepEqual(list.items, [1, 2, 3]);
+  });
 });
 
 describe('TestResultTypes', function() {

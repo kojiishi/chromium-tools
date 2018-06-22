@@ -348,6 +348,10 @@ class StringList {
     }
     Array.prototype.push.apply(this.items, item);
   }
+
+  makeUnique() {
+    this.items = Array.from(new Set(this.items));
+  }
 }
 
 class TestResultTypes extends StringList {
@@ -841,8 +845,9 @@ class TestResult {
       return false;
     }
     let actuals = this.actuals;
+    actuals.makeUnique();
     if (actuals.length !== 1) {
-      log.warn(`  Ignore rebaseline due to flaky: ${this.path}`);
+      log.warn(`  Ignore rebaseline due to flaky: ${this.path} ${actuals}`);
       return false;
     }
     let testPath = path.parse(this.path);
