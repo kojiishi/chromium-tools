@@ -711,7 +711,7 @@ class TestExpectations {
         // for a path.
         expectation = expectations[0];
       } else {
-        if (!addNew)
+        if (!addNew || !result.isUnexpected)
           continue;
         expectation = new TestExpectation(options.bug, result.path);
         this.add(expectation);
@@ -1079,8 +1079,7 @@ async function run(args) {
     } else if (options.deflake) {
       expectations.addActuals(results);
     } else {
-      expectations.addActuals(filter(results, r => r.isUnexpected),
-                              true);
+      expectations.addActuals(results, /* addNew */ true);
     }
     messages.push(results.message);
   }
