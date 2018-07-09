@@ -840,7 +840,9 @@ class TestResult {
   rebaseline(results, testExpectations) {
     if (!this.shouldRebaseline)
       return false;
-    if (this.isRefTest) {
+    if (this.isRefTest &&
+        // paint/invalidation/ has ref and also -expected.txt.
+        !/^paint\/invalidation\//.test(this.path)) {
       log.warn(`Cannot rebaseline a ref-test: ${this.path}`);
       return false;
     }
@@ -848,13 +850,6 @@ class TestResult {
     actuals.makeUnique();
     if (actuals.length !== 1) {
       log.warn(`  Ignore rebaseline due to flaky: ${this.path} ${actuals}`);
-      return false;
-    }
-    let testPath = path.parse(this.path);
-    let refPath = path.join(results.testRootDir, testPath.dir,
-                            testPath.name + '-expected' + testPath.ext);
-    if (fs.existsSync(refPath)) {
-      log.warn(`  Ignore rebaseline of ref test: ${this.path}`);
       return false;
     }
     log(`  Rebaseline ${actuals} for ${this.path}`);
