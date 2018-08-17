@@ -884,11 +884,17 @@ class TestResults {
   static async load(file) {
     // If this is a build#, download from the layout-test-archive.
     let sourcePath = file;
-    if (/^[0-9]+$/.test(file) && !fs.existsSync(file)) {
-      let build = file;
-      sourcePath = options.testResultsUrl(build);
-      file = path.join(process.env.HOME, 'ng-bot', build + '.json');
-      if (!fs.existsSync(file)) {
+    if (!fs.existsSync(file)) {
+      if (/^[0-9]+$/.test(file)) {
+        let build = file;
+        sourcePath = options.testResultsUrl(build);
+        file = path.join(process.env.HOME, 'ng-bot', build + '.json');
+        if (!fs.existsSync(file)) {
+          await options.download(sourcePath, file);
+        }
+      } else if (/^https:\/\//.test(file)) {
+        sourcePath = file.replace(/\/results\.html$/, '/full_results.json');
+        file = path.join(process.env.HOME, 'full_results.json');
         await options.download(sourcePath, file);
       }
     }
