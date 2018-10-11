@@ -172,8 +172,10 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   }
 
   testResultsUrl(build) {
-    return `https://test-results.appspot.com/data/layout_results/linux_layout_tests_layout_ng/${build}/layout-test-results/full_results.json`;
-    // return `https://test-results.appspot.com/data/layout_results/linux_layout_tests_layout_ng/${build}/webkit_layout_tests%20%28with%20patch%29/layout-test-results/full_results.json`;
+    let dir = build;
+    if (build >= 10478)
+      dir = build + '/webkit_layout_tests%20%28with%20patch%29';
+    return `https://test-results.appspot.com/data/layout_results/linux_layout_tests_layout_ng/${dir}/layout-test-results/full_results.json`;
   }
 
   get buildDir() {
