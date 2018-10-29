@@ -929,28 +929,39 @@ class TestResults {
   }
 
   static loadTryResults(list = []) {
-    log('Running "git cl try-results"...');
-    let results = child_process.execFileSync(
-        'git', ['cl', 'try-results', '--json=-']);
-    let builds = TestResults.parseTryResults(results);
+    class TryResult {
+      static get() {
+	log('Running "git cl try-results"...');
+	let results = child_process.execFileSync(
+            'git', ['cl', 'try-results', '--json=-']);
+	results = JSON.parse(results);
+	return results.map(json => new TryResult(json));
+      }
+
+      constructor(json) {
+	this.json = json;
+      }
+
+      get build() {
+	let build = this.json.tags[0].match(/\/(\d+)$/);
+	if (build)
+	  return build[1];
+	return null;
+      }
+
+      get status() { return this.json.status; }
+    }
+
+    let results = TryResult.get();
+    let builds = results
+	.filter(r => r.status === 'COMPLETED')
+	.map(r => r.build)
+	.filter(build => build);
+    builds.sort((a, b) => parseInt(a) - parseInt(b));
     log(`try-results are: ${builds.join(' ')}`);
     for (let build of builds) {
       list.push(TestResults.load(build));
     }
-    return list;
-  }
-
-  static parseTryResults(results, list = []) {
-    results = JSON.parse(results);
-    for (let result of results) {
-      let build = result.url.match(/\/(\d+)$/);
-      build = build ? build[1] : null;
-      log(`Build #${build} ${result.status} ${result.result || ''}`);
-      if (!build || result.status !== 'COMPLETED')
-        continue;
-      list.push(build);
-    }
-    list.sort((a, b) => parseInt(a) - parseInt(b));
     return list;
   }
 
