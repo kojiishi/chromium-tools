@@ -188,9 +188,9 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
       return dir;
     dir = process.env['CHROMIUM_SRC'];
     if (dir)
-      return path.join(dir, 'third_party', 'WebKit');
+      return path.join(dir, 'third_party', 'blink');
     for (dir = path.resolve(this.hintDir || '.');;) {
-      let d = path.join(dir, 'WebKit');
+      let d = path.join(dir, 'third_party', 'blink');
       if (fs.existsSync(d))
         return d;
       let parent = path.dirname(dir);
@@ -202,7 +202,7 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   }
 
   get testRootDir() {
-    return path.resolve(this.webKitDir, '../WebKit/LayoutTests');
+    return path.resolve(this.webKitDir, 'web_tests');
   }
 
   *testExpectationsPaths() {
