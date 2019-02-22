@@ -1,0 +1,59 @@
+#!/usr/bin/env node
+//
+// This tool generates a pivot table report from multiple text log files.
+//
+// Say you add:
+//
+//   static unsigned count = 0;
+//   LOG(INFO) << "Counter1=" << ++count;
+//   LOG(INFO) << "Counter2=" << count2;
+//
+// to your program and run it with different arguments:
+//
+//   % program arguments1 2> case1.log
+//   % program arguments2 2> case2.log
+//   % pivot-log case1.log case2.log
+//
+// A sample output of this program would be:
+//
+//   Counter1: case1=[count in case1.log] case2=[count in case2.log]
+//   Counter2: case1=[count2 in case1.log] case2=[count2 in case2.log]
+//
+const fs = require('fs');
+
+async function run_file(file) {
+  let content = fs.readFileSync(file, 'utf8');
+  let re = new RegExp(/^\[[^]*] ([^ ][^=]*)=(\d+)$/);
+  let kv = {};
+  for (let line of content.split(/\r?\n/)) {
+    let match = re.exec(line);
+    if (match) {
+      kv[match[1]] = parseInt(match[2]);
+    }
+  }
+  return kv;
+}
+
+async function run() {
+  let argv = process.argv.splice(2);
+  let kfv = {};
+  for (let arg of argv) {
+    let kv = await run_file(arg);
+    for (let key in kv) {
+      let fv = kfv[key];
+      if (!fv) {
+        kfv[key] = fv = {};
+      }
+      fv[arg] = kv[key];
+    }
+  }
+
+  for (let key of Object.keys(kfv).sort()) {
+    let fv = kfv[key];
+    console.log(`${key}: ${Object.entries(fv)
+        .map(fv => `${fv[0]}=${fv[1]}`)
+        .join(' ')}`);
+  }
+}
+
+run();
