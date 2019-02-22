@@ -19,6 +19,9 @@
 //   Counter1: case1=[count in case1.log] case2=[count in case2.log]
 //   Counter2: case1=[count2 in case1.log] case2=[count2 in case2.log]
 //
+// A sample log code at:
+// https://chromium-review.googlesource.com/c/chromium/src/+/1455836
+//
 const fs = require('fs');
 
 async function run_file(file) {
