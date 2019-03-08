@@ -29,39 +29,54 @@ class PivotLog {
     let args = process.argv.slice(2);
     const minimist = require('minimist');
     const options = minimist(args, {
-      boolean: ['log'],
+      boolean: ['ng', 'test'],
       alias: {
-        l: 'log',
+	n: 'ng',
+	t: 'test',
       },
     });
     args = options._;
 
-    if (options.log) {
-      await this.pivot_logs(args);
+    if (options.ng) {
+      this.runTargets(args, options);
       return;
     }
 
-    this.command = path.join(process.env.OUT, 'content_shell');
-    this.command_args = {
-      legacy: ['--run-web-tests'],
-      ng: ['--run-web-tests', '--enable-blink-features=LayoutNG'],
+    await this.pivot(args);
+  }
+
+  async runTargets(args, options) {
+    let command = path.join(process.env.OUT, 'content_shell');
+    let command_args0 = [];
+    if (options.test)
+      command_args0.push('--run-web-tests');
+    let command_args = {
+      legacy: command_args0,
+      ng: [...command_args0, '--enable-blink-features=LayoutNG'],
     };
 
     for (let arg of args) {
       console.log(arg);
-      let processes = Object.entries(this.command_args)
-        .map(entry => this.run_target(entry[0], [...entry[1], arg]));
-      let logs = await Promise.all(processes);
+      let processes = Object.entries(command_args)
+          .map(entry => this.runTarget(entry[0], command, [...entry[1], arg]));
+      let logs;
+      if (options.test) {
+        logs = await Promise.all(processes);
+      } else {
+        logs = [];
+        for (let p of processes)
+          logs.push(await p);
+      }
       await this.pivot(logs);
     }
   }
 
-  async run_target(name, args) {
+  async runTarget(name, command, args) {
     return new Promise((resolve, reject) => {
       let logpath = name + '.log';
-      const p = child_process.spawn(this.command, args, {
+      const p = child_process.spawn(command, args, {
         stdio: ['inherit', 'ignore', 'pipe'],
-        // shell: true,
+        shell: false,
       });
       const log = fs.createWriteStream(logpath);
       p.stderr.pipe(log);
