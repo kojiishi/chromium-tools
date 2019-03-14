@@ -2,17 +2,17 @@
 //
 // This tool generates a pivot table report from multiple runs of a program.
 //
-// Firt, add counters with "++" prefix; e.g.:
+// Firt, add counters to the code. A counter is a line in stderr that starts
+// with "++" prefix. E.g., the following line adds "Counter1" counter:
 //
 //   LOG(INFO) << "++Counter1";
 //
 // then run this tool:
 //
-//   % pivot-log http://www.google.com
+//   % pivot-log -nt http://www.google.com
 //
 // The tool runs `content_shell` twice with different arguments, collects
-// lines that start with "++" from stderr and creates and generates report
-// like this:
+// lines that start with "++" from stderr and generates a report like this:
 //
 //   Counter1: legacy=12 ng=15
 //   Counter2: legacy=15 ng=15
@@ -28,27 +28,31 @@ class PivotLog {
   async run() {
     let args = process.argv.slice(2);
     const minimist = require('minimist');
-    const options = minimist(args, {
-      boolean: ['ng', 'test'],
+    this.options = minimist(args, {
+      boolean: ['all', 'ng', 'test', 'verbose'],
       alias: {
-	n: 'ng',
-	t: 'test',
+        a: 'all',
+        n: 'ng',
+        t: 'test',
+        v: 'verbose',
       },
     });
-    args = options._;
+    args = this.options._;
+    this.verbose = this.options.verbose ?
+        console.log.bind(console) : () => {};
 
-    if (options.ng) {
-      this.runTargets(args, options);
+    if (this.options.ng) {
+      this.compare(args);
       return;
     }
 
     await this.pivot(args);
   }
 
-  async runTargets(args, options) {
+  async compare(args) {
     let command = path.join(process.env.OUT, 'content_shell');
     let command_args0 = [];
-    if (options.test)
+    if (this.options.test)
       command_args0.push('--run-web-tests');
     let command_args = {
       legacy: command_args0,
@@ -56,22 +60,21 @@ class PivotLog {
     };
 
     for (let arg of args) {
-      console.log(arg);
       let processes = Object.entries(command_args)
-          .map(entry => this.runTarget(entry[0], command, [...entry[1], arg]));
+          .map(entry => this.collect(entry[0], command, [...entry[1], arg]));
       let logs;
-      if (options.test) {
+      if (this.options.test) {
         logs = await Promise.all(processes);
       } else {
         logs = [];
         for (let p of processes)
           logs.push(await p);
       }
-      await this.pivot(logs);
+      await this.pivot(logs, arg);
     }
   }
 
-  async runTarget(name, command, args) {
+  async collect(name, command, args) {
     return new Promise((resolve, reject) => {
       let logpath = name + '.log';
       const p = child_process.spawn(command, args, {
@@ -107,26 +110,48 @@ class PivotLog {
     return kv;
   }
 
-  async pivot(logfiles) {
-    let kfv = {};
+  async pivot(logfiles, testname) {
+    let kfv_dict = {};
     for (let logfile of logfiles) {
       let kv = await this.parse(logfile);
       for (let key in kv) {
-        let fv = kfv[key];
+        let fv = kfv_dict[key];
         if (!fv) {
-          kfv[key] = fv = {};
+          kfv_dict[key] = fv = [];
         }
-        fv[logfile] = kv[key];
+        fv.push({name:logfile, value:kv[key]});
       }
     }
 
-    for (let key of Object.keys(kfv).sort()) {
-      let fv = kfv[key];
-      console.log(`${key}: ${Object.entries(fv)
-          .map(fv => {
-            let logname = fv[0].replace(/\.log$/, '');
-            return `${logname}=${fv[1]}`;
-          }).join(' ')}`);
+    let kfv_list = Object.entries(kfv_dict);
+    if (!kfv_list.length) {
+      this.verbose(`${testname}: no counters collected`);
+      return;
+    }
+  if (!this.options.all) {
+      kfv_list = kfv_list.filter(kfv => {
+        let value = kfv[1][0].value;
+        for (let fv of kfv[1]) {
+          if (value !== fv.value)
+            return true;
+        }
+        return false;
+      });
+      if (!kfv_list.length) {
+        this.verbose(`${testname}: no differences`);
+        return;
+      }
+    }
+    kfv_list = kfv_list.sort((a, b) => { return a[0] === a[1] ? 0 : (a[0] < a[1] ? -1 : 1); });
+    if (testname)
+      console.log(testname);
+    for (let kfv of kfv_list) {
+      let key = kfv[0];
+      let fv_list = kfv[1];
+      console.log(`${key}: ${fv_list.map(fv => {
+        let logname = fv.name.replace(/\.log$/, '');
+        return `${logname}=${fv.value}`;
+      }).join(' ')}`);
     }
   }
 };
