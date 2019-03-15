@@ -142,7 +142,7 @@ class PivotLog {
         return;
       }
     }
-    kfv_list = kfv_list.sort((a, b) => { return a[0] === a[1] ? 0 : (a[0] < a[1] ? -1 : 1); });
+    kfv_list = kfv_list.sort((a, b) => { return a[0] === b[0] ? 0 : (a[0] < b[0] ? -1 : 1); });
     if (testname)
       console.log(testname);
     for (let kfv of kfv_list) {
