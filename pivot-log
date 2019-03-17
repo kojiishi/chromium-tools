@@ -130,9 +130,12 @@ class PivotLog {
     }
   if (!this.options.all) {
       kfv_list = kfv_list.filter(kfv => {
-        let value = kfv[1][0].value;
-        for (let fv of kfv[1]) {
-          if (value !== fv.value)
+        let fv_list = kfv[1];
+        if (fv_list.length !== logfiles.length)
+          return true;
+        let value = fv_list[0].value;
+        for (let i = 1; i < fv_list.length; i++) {
+          if (fv_list[i].value !== value)
             return true;
         }
         return false;
@@ -148,7 +151,7 @@ class PivotLog {
     for (let kfv of kfv_list) {
       let key = kfv[0];
       let fv_list = kfv[1];
-      console.log(`${key}: ${fv_list.map(fv => {
+      console.log(`  ${key}: ${fv_list.map(fv => {
         let logname = fv.name.replace(/\.log$/, '');
         return `${logname}=${fv.value}`;
       }).join(' ')}`);
