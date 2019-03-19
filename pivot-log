@@ -38,8 +38,7 @@ class PivotLog {
       },
     });
     args = this.options._;
-    this.verbose = this.options.verbose ?
-        console.log.bind(console) : () => {};
+    this.verbose = this.options.verbose ? console.log.bind(console) : () => {};
 
     if (this.options.ng) {
       this.compare(args);
@@ -77,6 +76,7 @@ class PivotLog {
   async collect(name, command, args) {
     return new Promise((resolve, reject) => {
       let logpath = name + '.log';
+      this.verbose([command, ...args].map(arg => arg.includes(' ') ? "'" + arg + "'" : arg).join(' '));
       const p = child_process.spawn(command, args, {
         stdio: ['inherit', 'ignore', 'pipe'],
         shell: false,
@@ -89,6 +89,7 @@ class PivotLog {
     });
   }
 
+  // Parse a log file and return a dictionary of key-value pairs.
   async parse(file) {
     let content = fs.readFileSync(file, 'utf8');
     let re_inc = new RegExp(/^\[[^]*] \+\+(\S+)/);
@@ -128,7 +129,7 @@ class PivotLog {
       this.verbose(`${testname}: no counters collected`);
       return;
     }
-  if (!this.options.all) {
+    if (!this.options.all) {
       kfv_list = kfv_list.filter(kfv => {
         let fv_list = kfv[1];
         if (fv_list.length !== logfiles.length)
