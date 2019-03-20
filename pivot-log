@@ -93,7 +93,7 @@ class PivotLog {
   async parse(file) {
     let content = fs.readFileSync(file, 'utf8');
     let re_inc = new RegExp(/^\[[^]*] \+\+(\S+)/);
-    let re_assign = new RegExp(/^\[[^]*] ([^ ][^=]*)=(\d+)$/);
+    let re_assign = new RegExp(/^\[[^]*] ([a-zA-Z][a-zA-Z0-9_.]*)=(\d+)$/);
     let kv = {};
     for (let line of content.split(/\r?\n/)) {
       let match = re_inc.exec(line);
@@ -105,7 +105,14 @@ class PivotLog {
       }
       match = re_assign.exec(line);
       if (match) {
-        kv[match[1]] = parseInt(match[2]);
+        let key = match[1];
+        let value = parseInt(match[2]);
+	let current = kv[key];
+	if (current === undefined) {
+	  kv[key] = [value];
+	} else {
+	  current.push(value);
+	}
       }
     }
     return kv;
@@ -129,7 +136,7 @@ class PivotLog {
       this.verbose(`${testname}: no counters collected`);
       return;
     }
-    if (!this.options.all) {
+    if (!this.options.all && logfiles.length > 1) {
       kfv_list = kfv_list.filter(kfv => {
         let fv_list = kfv[1];
         if (fv_list.length !== logfiles.length)
@@ -153,8 +160,9 @@ class PivotLog {
       let key = kfv[0];
       let fv_list = kfv[1];
       console.log(`  ${key}: ${fv_list.map(fv => {
-        let logname = fv.name.replace(/\.log$/, '');
-        return `${logname}=${fv.value}`;
+        let name = fv.name.replace(/\.log$/, '');
+        let value = fv.value;
+        return `${name}=${value}`;
       }).join(' ')}`);
     }
   }
