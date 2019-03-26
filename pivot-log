@@ -24,6 +24,39 @@ const child_process = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+class ChildProcess {
+  constructor(command, args) {
+    this.command = command;
+    this.args = args;
+    this.options = {
+      stdio: ['inherit', 'ignore', 'pipe'],
+      shell: false,
+    };
+  }
+
+  get commandLine() {
+    return [this.command, ...this.args]
+        .map(arg => arg.includes(' ') ? "'" + arg + "'" : arg)
+        .join(' ');
+  }
+
+  async run() {
+    return new Promise((resolve, reject) => {
+      const p = child_process.spawn(this.command, this.args, {
+        stdio: ['inherit', this.stdout ? 'pipe' : 'inherit', this.stderr ? 'pipe' : 'inherit'],
+        shell: false,
+      });
+      if (this.stdout)
+        p.stdout.pipe(fs.createWriteStream(this.stdout));
+      if (this.stderr)
+        p.stderr.pipe(fs.createWriteStream(this.stderr));
+      p.on('close', (code) => {
+        resolve();
+      });
+    });
+  }
+};
+
 class PivotLog {
   async run() {
     let args = process.argv.slice(2);
@@ -60,7 +93,7 @@ class PivotLog {
 
     for (let arg of args) {
       let processes = Object.entries(command_args)
-          .map(entry => this.collect(entry[0], command, [...entry[1], arg]));
+          .map((entry) => this.collect(arg, entry[0], command, [...entry[1], arg]));
       let logs;
       if (this.options.test) {
         logs = await Promise.all(processes);
@@ -73,20 +106,13 @@ class PivotLog {
     }
   }
 
-  async collect(name, command, args) {
-    return new Promise((resolve, reject) => {
-      let logpath = name + '.log';
-      this.verbose([command, ...args].map(arg => arg.includes(' ') ? "'" + arg + "'" : arg).join(' '));
-      const p = child_process.spawn(command, args, {
-        stdio: ['inherit', 'ignore', 'pipe'],
-        shell: false,
-      });
-      const log = fs.createWriteStream(logpath);
-      p.stderr.pipe(log);
-      p.on('close', (code) => {
-        resolve(logpath);
-      });
-    });
+  async collect(test, config, command, args) {
+    let p = new ChildProcess(command, args);
+    p.stdout = config + '-stdout.log';
+    p.stderr = config + '.log';
+    this.verbose(p.commandLine);
+    await p.run();
+    return p.stderr;
   }
 
   // Parse a log file and return a dictionary of key-value pairs.
@@ -107,12 +133,12 @@ class PivotLog {
       if (match) {
         let key = match[1];
         let value = parseInt(match[2]);
-	let current = kv[key];
-	if (current === undefined) {
-	  kv[key] = [value];
-	} else {
-	  current.push(value);
-	}
+        let current = kv[key];
+        if (current === undefined) {
+          kv[key] = [value];
+        } else {
+          current.push(value);
+        }
       }
     }
     return kv;
