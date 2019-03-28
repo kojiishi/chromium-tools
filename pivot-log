@@ -117,7 +117,7 @@ class PivotLog {
 
   // Parse a log file and return a dictionary of key-value pairs.
   async parse(file) {
-    let content = fs.readFileSync(file, 'utf8');
+    let content = fs.readFileSync(file === '-' ? process.stdin.fd : file, 'utf8');
     let re_inc = new RegExp(/^\[[^]*] \+\+(\S+)/);
     let re_assign = new RegExp(/^\[[^]*] ([a-zA-Z][a-zA-Z0-9_.]*)=(\d+)$/);
     let kv = {};
@@ -188,6 +188,8 @@ class PivotLog {
       console.log(`  ${key}: ${fv_list.map(fv => {
         let name = fv.name.replace(/\.log$/, '');
         let value = fv.value;
+        if (Array.isArray(value))
+          value = `[${value.length}]{${value.join(',')}}`;
         return `${name}=${value}`;
       }).join(' ')}`);
     }
