@@ -57,11 +57,11 @@ class ChildProcess {
   }
 };
 
-class PivotLog {
-  async run() {
+class Counters {
+  static async run() {
     let args = process.argv.slice(2);
     const minimist = require('minimist');
-    this.options = minimist(args, {
+    let options = minimist(args, {
       boolean: ['all', 'ng', 'test', 'verbose'],
       alias: {
         a: 'all',
@@ -70,21 +70,21 @@ class PivotLog {
         v: 'verbose',
       },
     });
-    args = this.options._;
-    this.verbose = this.options.verbose ? console.log.bind(console) : () => {};
+    args = options._;
+    options.verbose = options.verbose ? console.log.bind(console) : () => {};
 
-    if (this.options.ng) {
-      this.compare(args);
+    if (options.ng) {
+      this.compare(args, options);
       return;
     }
 
     await this.pivot(args);
   }
 
-  async compare(args) {
+  static async compare(args, options) {
     let command = path.join(process.env.OUT, 'content_shell');
     let command_args0 = [];
-    if (this.options.test)
+    if (options.test)
       command_args0.push('--run-web-tests');
     let command_args = {
       legacy: command_args0,
@@ -93,26 +93,28 @@ class PivotLog {
 
     for (let arg of args) {
       let processes = Object.entries(command_args)
-          .map((entry) => this.collect(arg, entry[0], command, [...entry[1], arg]));
-      let logs;
-      if (this.options.test) {
-        logs = await Promise.all(processes);
+          .map((entry) => {
+            let p = new ChildProcess(command, [...entry[1], arg]);
+            let config = entry[0];
+            p.stdout = config + '-stdout.log';
+            p.stderr = config + '.log';
+            return p;
+          });
+      if (options.test) {
+        // Run all processes in parallel.
+        await Promise.all(processes.map(p => {
+          options.verbose(p.commandLine);
+          return p.run();
+        }));
       } else {
-        logs = [];
-        for (let p of processes)
-          logs.push(await p);
+        // Run all processes sequentially.
+        for (let p of processes) {
+          options.verbose(p.commandLine);
+          await p.run();
+        }
       }
-      await this.pivot(logs, arg);
+      await Counters.pivot(processes.map(p => p.stderr), arg, options);
     }
-  }
-
-  async collect(test, config, command, args) {
-    let p = new ChildProcess(command, args);
-    p.stdout = config + '-stdout.log';
-    p.stderr = config + '.log';
-    this.verbose(p.commandLine);
-    await p.run();
-    return p.stderr;
   }
 
   // Parse a log file and return a dictionary of key-value pairs.
@@ -120,7 +122,7 @@ class PivotLog {
     let content = fs.readFileSync(file === '-' ? process.stdin.fd : file, 'utf8');
     let re_inc = new RegExp(/^\[[^]*] \+\+(\S+)/);
     let re_assign = new RegExp(/^\[[^]*] ([a-zA-Z][a-zA-Z0-9_.]*)=(\d+)$/);
-    let kv = {};
+    let kv = this.kv = {};
     for (let line of content.split(/\r?\n/)) {
       let match = re_inc.exec(line);
       if (match) {
@@ -141,28 +143,33 @@ class PivotLog {
         }
       }
     }
-    return kv;
   }
 
-  async pivot(logfiles, testname) {
+  pivotTo(logfile, kfv_dict) {
+    let kv = this.kv;
+    for (let key in kv) {
+      let fv = kfv_dict[key];
+      if (!fv) {
+        kfv_dict[key] = fv = [];
+      }
+      fv.push({name:logfile, value:kv[key]});
+    }
+  }
+
+  static async pivot(logfiles, testname, options) {
     let kfv_dict = {};
     for (let logfile of logfiles) {
-      let kv = await this.parse(logfile);
-      for (let key in kv) {
-        let fv = kfv_dict[key];
-        if (!fv) {
-          kfv_dict[key] = fv = [];
-        }
-        fv.push({name:logfile, value:kv[key]});
-      }
+      let counters = new Counters();
+      await counters.parse(logfile);
+      counters.pivotTo(logfile, kfv_dict);
     }
 
     let kfv_list = Object.entries(kfv_dict);
     if (!kfv_list.length) {
-      this.verbose(`${testname}: no counters collected`);
+      options.verbose(`${testname}: no counters collected`);
       return;
     }
-    if (!this.options.all && logfiles.length > 1) {
+    if (!options.all && logfiles.length > 1) {
       kfv_list = kfv_list.filter(kfv => {
         let fv_list = kfv[1];
         if (fv_list.length !== logfiles.length)
@@ -175,7 +182,7 @@ class PivotLog {
         return false;
       });
       if (!kfv_list.length) {
-        this.verbose(`${testname}: no differences`);
+        options.verbose(`${testname}: no differences`);
         return;
       }
     }
@@ -196,4 +203,4 @@ class PivotLog {
   }
 };
 
-(new PivotLog()).run();
+Counters.run();
