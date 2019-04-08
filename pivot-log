@@ -78,7 +78,12 @@ class Counters {
       return;
     }
 
-    await this.pivot(args);
+    if (args.length) {
+      await this.pivot(args, options);
+      return;
+    }
+
+    await this.pivot(['-'], options);
   }
 
   static async compare(args, options) {
@@ -113,7 +118,7 @@ class Counters {
           await p.run();
         }
       }
-      await Counters.pivot(processes.map(p => p.stderr), arg, options);
+      await Counters.pivot(processes.map(p => p.stderr), options, arg);
     }
   }
 
@@ -156,7 +161,7 @@ class Counters {
     }
   }
 
-  static async pivot(logfiles, testname, options) {
+  static async pivot(logfiles, options, testname) {
     let kfv_dict = {};
     for (let logfile of logfiles) {
       let counters = new Counters();
