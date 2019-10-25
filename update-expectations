@@ -14,6 +14,10 @@ const statistics = {
 };
 let async_tasks = [];
 let options;
+const builder_for_flag = {
+  'enable-blink-features=LayoutNG': 'linux_layout_tests_layout_ng',
+  'enable-blink-features=LayoutNGFragmentItem': 'linux-layout-tests-fragment-item',
+};
 
 class Options {
   constructor() {
@@ -24,7 +28,7 @@ class Options {
     args = args || process.argv.slice(2);
     const options = minimist(args, {
       boolean: ['deflake', 'no-commit', 'remove', 'sort', 'verbose'],
-      string: ['bug', 'expects', 'file', 'flag', 'path', 'rebaseline'],
+      string: ['bug', 'builder', 'expects', 'file', 'flag', 'path', 'rebaseline'],
       alias: {
         b: 'bug',
         d: 'deflake',
@@ -44,10 +48,12 @@ class Options {
           throw new Error(`Unknown option ${arg}
 Usage: ${path.basename(__filename)} [options] [results.json...]
   -b <bug>: The bug number/string for new entries.
+  --builder <builder>: Specify the builder to download test results from.
   -d: De-flake if all results are pass.
   -e <expect,expect,...>: Update specified expects only.
      If the expect starts with '-', it is ignored instead.
   -f <file>: The TestExpectations file path.
+  --flag <run-time flag>: Run-time flag.
   -p <string>: Only include tests with the specified path.
      If the path starts with '-', it is excluded instead.
   -r <test paths>: Rebaseline specified tests instead of adding to expectations.
@@ -81,6 +87,8 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
     };
     if (this.bug && this.bug.match(/^\d/))
       this.bug = 'crbug.com/' + this.bug;
+    if (!this.builder && this.flag)
+      this.builder = builder_for_flag[this.flag];
     this.expects = (args => {
       if (!args.length)
         return {};
@@ -173,9 +181,14 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
 
   testResultsUrl(build) {
     let dir = build;
-    if (build >= 10478)
+    if (!(build >= 10478 && this.builder === 'linux_layout_tests_layout_ng'))
       dir = build + '/webkit_layout_tests%20%28with%20patch%29';
-    return `https://test-results.appspot.com/data/layout_results/linux_layout_tests_layout_ng/${dir}/layout-test-results/full_results.json`;
+    return `https://test-results.appspot.com/data/layout_results/${this.builder}/${dir}/layout-test-results/full_results.json`;
+  }
+
+  testResultsDir(build) {
+    let root = path.join(process.env.HOME, 'g', 'layout-test-results', this.builder);
+    return path.join(root, build + '.json');
   }
 
   get buildDir() {
@@ -891,7 +904,7 @@ class TestResults {
       if (/^[0-9]+$/.test(file)) {
         let build = file;
         sourcePath = options.testResultsUrl(build);
-        file = path.join(process.env.HOME, 'ng-bot', build + '.json');
+        file = options.testResultsDir(build);
         if (!fs.existsSync(file)) {
           await options.download(sourcePath, file);
         }
@@ -910,7 +923,7 @@ class TestResults {
     return new TestResults(JSON.parse(content), sourcePath);
   }
 
-  static loadArgs(args) {
+  static async loadArgs(args) {
     let list = [];
     for (let arg of args) {
       if (!fs.existsSync(arg)) {
@@ -919,7 +932,7 @@ class TestResults {
           continue;
         }
         if ('try-results'.startsWith(arg)) {
-          TestResults.loadTryResults(list);
+          await TestResults.loadTryResults(list);
           continue;
         }
       }
@@ -928,25 +941,34 @@ class TestResults {
     return list;
   }
 
-  static loadTryResults(list = []) {
+  static async loadTryResults(list = []) {
     class TryResult {
       static get() {
-	log('Running "git cl try-results"...');
-	let results = child_process.execFileSync(
+        log('Running "git cl try-results"...');
+        let results = child_process.execFileSync(
             'git', ['cl', 'try-results', '--json=-']);
-	results = JSON.parse(results);
-	return results.map(json => new TryResult(json));
+        results = JSON.parse(results);
+        return results.map(json => new TryResult(json));
       }
 
       constructor(json) {
-	this.json = json;
+        this.json = json;
       }
 
-      get build() {
-	let build = this.json.tags[0].match(/\/(\d+)$/);
-	if (build)
-	  return build[1];
-	return null;
+      async build() {
+        let url = 'https://cr-buildbucket.appspot.com/build/' + this.json.id;
+        while (true) {
+          let rs = await rp(url, {followRedirect: false, simple: false, resolveWithFullResponse: true});
+          if (rs.statusCode === 302 || rs.statusCode === 301) {
+            url = rs.headers.location;
+            let match = url.match(`/${options.builder}/(\\d+)$`);
+            if (match)
+              return match[1];
+            continue;
+          }
+          break;
+        }
+        return null;
       }
 
       get status() { return this.json.status; }
@@ -954,9 +976,9 @@ class TestResults {
 
     let results = TryResult.get();
     let builds = results
-	.filter(r => r.status === 'COMPLETED')
-	.map(r => r.build)
-	.filter(build => build);
+        .filter(r => r.status === 'SUCCESS')
+        .map(r => r.build());
+    builds = await Promise.all(builds);
     builds.sort((a, b) => parseInt(a) - parseInt(b));
     log(`try-results are: ${builds.join(' ')}`);
     for (let build of builds) {
@@ -1077,7 +1099,7 @@ async function run(args) {
     statistics[key] = 0;
 
   log(`Loading results: ${args.join(' ')}`);
-  args = TestResults.loadArgs(args);
+  args = await TestResults.loadArgs(args);
   let messages = [];
   for (let results of args) {
     try {
