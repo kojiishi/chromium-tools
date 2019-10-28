@@ -5,6 +5,7 @@ const child_process = require('child_process');
 const fs = require('fs-extra');
 const path = require('path');
 const rp = require('request-promise-native');
+const {URL} = require('url');
 
 let log = () => {};
 const statistics = {
@@ -187,7 +188,7 @@ Usage: ${path.basename(__filename)} [options] [results.json...]
   }
 
   testResultsDir(build) {
-    let root = path.join(process.env.HOME, 'g', 'layout-test-results', this.builder);
+    let root = path.join(process.env.HOME, 'bots', this.builder);
     return path.join(root, build + '.json');
   }
 
@@ -955,28 +956,37 @@ class TestResults {
         this.json = json;
       }
 
+      id() { return this.json.id; }
+      status() { return this.json.status; }
+      hasLayoutTestResults() {
+        let status = this.status();
+        if (status === 'SUCCESS')
+          return true;
+        log(`Skipped try-result: ${this.id()} ${status}`);
+        return false;
+      }
+
       async build() {
-        let url = 'https://cr-buildbucket.appspot.com/build/' + this.json.id;
+        let url = 'https://cr-buildbucket.appspot.com/build/' + this.id();
         while (true) {
           let rs = await rp(url, {followRedirect: false, simple: false, resolveWithFullResponse: true});
           if (rs.statusCode === 302 || rs.statusCode === 301) {
-            url = rs.headers.location;
-            let match = url.match(`/${options.builder}/(\\d+)$`);
+            let new_url = rs.headers.location;
+            let match = new_url.match(`/${options.builder}/(\\d+)$`);
             if (match)
               return match[1];
+            url = new URL(new_url, url).href;
             continue;
           }
           break;
         }
         return null;
       }
-
-      get status() { return this.json.status; }
     }
 
     let results = TryResult.get();
     let builds = results
-        .filter(r => r.status === 'SUCCESS')
+        .filter(r => r.hasLayoutTestResults())
         .map(r => r.build());
     builds = await Promise.all(builds);
     builds.sort((a, b) => parseInt(a) - parseInt(b));
