@@ -61,14 +61,14 @@ args=()
 
 for arg in "$@"; do
   if [[ $arg == "try" ]]; then
-    git cl try -B luci.chromium.try -b $BUILDER
+    git cl try -B chromium/try -b $BUILDER
     exit
   fi
   if [[ $arg == up* ]]; then
     COMMIT_MESSAGE=$(git log --format=%B origin..HEAD)
     MESSAGE_FILE=$(mktemp --suffix=-cl-message)
     cat <<EOF >>$MESSAGE_FILE
-Update FlagExpectations for LayoutNGFragmentItem
+[auto] Update FlagExpectations for LayoutNGFragmentItem
 
 Following bot results are included.
 $COMMIT_MESSAGE
@@ -82,7 +82,6 @@ Bug: $BUG
 EOF
     git cl upload --message-file=$MESSAGE_FILE
     rm $MESSAGE_FILE
-    git cl try -B luci.chromium.try -b $BUILDER
     exit
   fi
   args+=("$arg")

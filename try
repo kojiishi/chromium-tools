@@ -1,0 +1,14 @@
+#!/bin/bash
+cd ~/src/chromium/src
+export PATH=${PATH}:~/src/chromium/depot_tools
+re='^[[:space:]]*([^[:space:]]+) .*/([0-9]+)$'
+git map-branches -vv --no-color | while read LINE; do
+  if [[ $LINE =~ $re ]]; then
+    branch="${BASH_REMATCH[1]}"
+    issue="${BASH_REMATCH[2]}"
+    if [[ $branch == 'b' ]]; then
+      (set -x; git cl try -B luci.chromium.try -b linux-layout-tests-fragment-item -i $issue)
+    fi
+  fi
+done
+#git cl try -B luci.chromium.try -b linux-layout-tests-fragment-item -i $1
