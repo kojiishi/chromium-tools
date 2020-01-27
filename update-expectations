@@ -972,7 +972,7 @@ class TestResults {
         let status = this.status();
         if (status === 'SUCCESS')
           return true;
-        if (status === 'INFRA_FAILURE') {
+        if (status === 'INFRA_FAILURE' || status === 'FAILURE') {
           // TODO: Should check if the initial try failed or retry failed.
           return true;
         }
