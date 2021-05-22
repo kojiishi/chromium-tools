@@ -5,7 +5,7 @@ This directory contains tools for Chromium.
 This is the core script to update [FlagExpectations].
 
 [ng-bot] and [fragment-item] are small front-end scripts
-tha call [update-expectaions].
+that call this script.
 
 # [summarize-tryjobs]
 
