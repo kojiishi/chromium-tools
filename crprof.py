@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+#
+# A tool for profiling Chromium renderer processes.
+#
+# Also see:
+# https://source.chromium.org/chromium/chromium/src/+/main:docs/profiling.md?q=profiling.md&ss=chromium
+#
 import argparse
 import logging
 import os
@@ -29,67 +35,57 @@ class Profiler(object):
         self.perf.wait()
         logger.info('perf "%s" done.', self.perf_data_path)
 
-    def pprof(self, pprof_options):
+    def pprof(self, options=None):
         args = ['pprof']
-        if pprof_options is None:
+        if options is None:
             args.append('-svg')
         else:
-            args += shlex.split(pprof_options)
+            args += shlex.split(options)
         args.append(self.perf_data_path)
         logger.info('Running %s', args)
         subprocess.run(args)
 
     @staticmethod
     def interactive(profilers, options):
+        for profiler in profilers:
+            profiler.is_done = False
         while True:
-            if options.keep:
-                print('[d] Delete perf data when done')
-            else:
-                print('[k] Keep perf data when done')
-            print(f'[-*] Set pprof options (current: "{options.pprof}")')
             for i, profiler in enumerate(profilers):
-                print(f'[{i + 1}] {profiler.perf_data_path} '
+                print(f'{"*" if profiler.is_done else " "} '
+                      f'{i + 1}: {profiler.perf_data_path} '
                       f'{os.stat(profiler.perf_data_path).st_size:10,}')
-            print(f'Run pprof for: ', end='', flush=True)
+            prompt = (f'Run "pprof {options.pprof}" for '
+                      '(-*: change options, ^C: keep data): ')
+            print(prompt, end='', flush=True)
             line = sys.stdin.readline().rstrip()
             if not line:
                 break
-            if line == 'k':
-                options.keep = True
-                continue
-            elif line == 'd':
-                options.keep = False
-                continue
-            elif line[0] == '-':
+            if line[0] == '-':
                 options.pprof = line
                 continue
             try:
                 i = int(line) - 1
                 profiler = profilers[i]
-                profiler.pprof(options.pprof)
-                if not options.keep:
-                    os.unlink(profiler.perf_data_path)
-                    del profilers[i]
+                profiler.pprof(options=options.pprof)
+                profiler.is_done = True
             except ValueError:
                 print(f'"{line}" not recognized.')
-        if not options.keep:
-            for profiler in profilers:
-                os.unlink(profiler.perf_data_path)
+        for profiler in profilers:
+            os.unlink(profiler.perf_data_path)
 
 
 def run(args, options):
     logger.info('Starting %s', args)
     target = subprocess.Popen(args,
-                              bufsize=0,
                               stdin=subprocess.DEVNULL,
                               stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT)
+                              stderr=subprocess.STDOUT,
+                              text=True)
     profilers = []
     pid_pattern = re.compile(
         r'Renderer \((\d+)\) paused waiting for debugger to attach. '
         r'Send SIGUSR1 to unpause.')
-    for line in iter(target.stdout.readline, b''):
-        line = line.decode('utf-8')
+    for line in iter(target.stdout.readline, ''):
         print(line, end='', flush=True)
         match = pid_pattern.search(line)
         if match:
@@ -108,7 +104,6 @@ def main():
                         default=os.path.join(os.environ.get('OUT'), 'chrome'))
     parser.add_argument('args', nargs='*')
     parser.add_argument('-f', '--frequency', help='perf frequency')
-    parser.add_argument('-k', '--keep', help='keep perf.data')
     parser.add_argument('--pprof', default='-svg', help='pprof options')
     options = parser.parse_args()
     logging.basicConfig(level=logging.INFO)

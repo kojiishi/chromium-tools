@@ -1,5 +1,11 @@
 This directory contains tools for Chromium.
 
+# [crprof.py]
+
+A tool for profiling Chromium renderer processes.
+
+[crprof.py]: crprof.py
+
 # [update-expectations]
 
 This is the core script to update [FlagExpectations].
