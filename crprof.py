@@ -99,15 +99,15 @@ def run(args, options):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-p', '--program',
+    parser.add_argument('-t', '--target',
                         default=os.path.join(os.environ.get('OUT'), 'chrome'))
-    parser.add_argument('-f', '--frequency', help='perf frequency')
+    parser.add_argument('-F', '--frequency', help='perf frequency')
     parser.add_argument('--pprof', default='-svg', help='pprof options')
     parser.add_argument('args', nargs='*')
     options = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     args = [
-        options.program,
+        options.target,
         '--renderer-startup-dialog',
         '--no-sandbox',
         '--no-first-run',
