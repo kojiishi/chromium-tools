@@ -3,7 +3,8 @@
 # A tool for profiling Chromium renderer processes.
 #
 # Also see:
-# https://source.chromium.org/chromium/chromium/src/+/main:docs/profiling.md?q=profiling.md&ss=chromium
+# https://source.chromium.org/chromium/chromium/src/+/main:docs/profiling.md
+# https://source.chromium.org/chromium/chromium/src/+/main:docs/linux/profiling.md
 #
 import argparse
 import logging
@@ -25,6 +26,9 @@ class Profiler(object):
             'perf', 'record', '-g', '-p',
             str(pid), '-o', self.perf_data_path
         ]
+        # On virtualized systems, the PMU counters may not be available or may
+        # be broken. b/313526654
+        args.extend(['-e', 'cpu-clock'])
         if frequency:
             args.extend(['-F', frequency])
         self.perf = subprocess.Popen(args)
