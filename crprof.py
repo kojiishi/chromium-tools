@@ -39,12 +39,9 @@ class Profiler(object):
         self.perf.wait()
         logger.info('perf "%s" done.', self.perf_data_path)
 
-    def pprof(self, options=None):
+    def pprof(self, options=['-web']):
         args = ['pprof']
-        if options is None:
-            args.append('-svg')
-        else:
-            args += shlex.split(options)
+        args += options
         args.append(self.perf_data_path)
         logger.info('Running %s', args)
         subprocess.run(args)
@@ -59,14 +56,16 @@ class Profiler(object):
                       f'{i + 1}: {profiler.perf_data_path} '
                       f'{os.stat(profiler.perf_data_path).st_size:10,}')
             print(' -*: Change options (e.g., "-web -show_from=BlockNode::Layout")')
-            print(' ^C: Keep data and exit')
-            prompt = (f'Run "pprof {options.pprof}" for: ')
+            print('  x: Exit, ^C: Keep data and exit')
+            prompt = (f'Run "pprof {shlex.join(options.pprof)}" for: ')
             print(prompt, end='', flush=True)
             line = sys.stdin.readline().rstrip()
             if not line:
+                continue
+            if line == 'x':
                 break
             if line[0] == '-':
-                options.pprof = line
+                options.pprof = shlex.split(line)
                 continue
             try:
                 i = int(line) - 1
@@ -107,7 +106,7 @@ def main():
     parser.add_argument('-t', '--target',
                         default=os.path.join(os.environ.get('OUT'), 'chrome'))
     parser.add_argument('-F', '--frequency', help='perf frequency')
-    parser.add_argument('--pprof', default='-web', help='pprof options')
+    parser.add_argument('--pprof', default=['-web'], help='pprof options', nargs='*')
     parser.add_argument('args', nargs='*')
     options = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
