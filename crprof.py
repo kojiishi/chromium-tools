@@ -58,8 +58,9 @@ class Profiler(object):
                 print(f'{"*" if profiler.is_done else " "} '
                       f'{i + 1}: {profiler.perf_data_path} '
                       f'{os.stat(profiler.perf_data_path).st_size:10,}')
-            prompt = (f'Run "pprof {options.pprof}" for '
-                      '(-*: change options, ^C: keep data): ')
+            print(' -*: Change options (e.g., "-web -show_from=BlockNode::Layout")')
+            print(' ^C: Keep data and exit')
+            prompt = (f'Run "pprof {options.pprof}" for: ')
             print(prompt, end='', flush=True)
             line = sys.stdin.readline().rstrip()
             if not line:
@@ -106,7 +107,7 @@ def main():
     parser.add_argument('-t', '--target',
                         default=os.path.join(os.environ.get('OUT'), 'chrome'))
     parser.add_argument('-F', '--frequency', help='perf frequency')
-    parser.add_argument('--pprof', default='-svg', help='pprof options')
+    parser.add_argument('--pprof', default='-web', help='pprof options')
     parser.add_argument('args', nargs='*')
     options = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
