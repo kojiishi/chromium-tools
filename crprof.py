@@ -96,6 +96,7 @@ class Profilers(object):
             print(' -*: Set options (e.g., "-web -show_from=BlockNode::Layout")')
             print(' +*: Add "-*" to the current options')
             print(' /*: Remove "-*" from the current options')
+            print('  s: Substitute strings in the current options')
             print('  q: Quit, ^C: Keep data and exit')
             prompt = (f'Run "pprof {shlex.join(self.pprof)}" for: ')
             print(prompt, end='', flush=True)
@@ -118,6 +119,13 @@ class Profilers(object):
                         print(f'The "{option}" is not in the current options: '
                               f'{self.pprof}')
                 continue
+            if line[0] == 's':
+                match = re.match(r'/([^/]*)/([^/]*)/?$', line[1:])
+                if match:
+                    old = match.group(1)
+                    new = match.group(2)
+                    self.pprof = [i.replace(old, new) for i in self.pprof]
+                    continue
             try:
                 i = int(line) - 1
                 profiler = self.profilers[i]
