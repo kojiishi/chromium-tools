@@ -96,13 +96,13 @@ class Profilers(object):
             print(' -*: Set options (e.g., "-web -show_from=BlockNode::Layout")')
             print(' +*: Add "-*" to the current options')
             print(' /*: Remove "-*" from the current options')
-            print('  x: Exit, ^C: Keep data and exit')
+            print('  q: Quit, ^C: Keep data and exit')
             prompt = (f'Run "pprof {shlex.join(self.pprof)}" for: ')
             print(prompt, end='', flush=True)
             line = sys.stdin.readline().rstrip()
             if not line:
                 continue
-            if line == 'x':
+            if line == 'q':
                 break
             if line[0] == '-':
                 self.pprof = shlex.split(line)
