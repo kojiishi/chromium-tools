@@ -46,12 +46,50 @@ class Profiler(object):
         logger.info('Running %s', args)
         subprocess.run(args)
 
-    @staticmethod
-    def interactive(profilers, options):
+
+class Profilers(object):
+    def __init__(self) -> None:
+        self.profilers = []
+
+    def run(self):
+        args = [
+            self.target,
+            '--renderer-startup-dialog',
+            '--no-sandbox',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--remote-debugging-port=9999',
+            '--user-data-dir=/tmp/chromium',
+        ]
+        args += self.args
+        logger.info('Starting: %s', shlex.join(args))
+        target = subprocess.Popen(args,
+                                stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,
+                                text=True)
+        profilers = []
+        pid_pattern = re.compile(
+            r'Renderer \((\d+)\) paused waiting for debugger to attach. '
+            r'Send SIGUSR1 to unpause.')
+        for line in iter(target.stdout.readline, ''):
+            print(line, end='', flush=True)
+            match = pid_pattern.search(line)
+            if match:
+                pid = int(match[1])
+                profiler = Profiler(pid, frequency=self.frequency)
+                profilers.append(profiler)
+                os.kill(pid, signal.SIGUSR1)
+                logger.info('SIGUSR1 %d', pid)
         for profiler in profilers:
+            profiler.wait()
+        self.profilers = profilers
+
+    def interactive(self):
+        for profiler in self.profilers:
             profiler.is_done = False
         while True:
-            for i, profiler in enumerate(profilers):
+            for i, profiler in enumerate(self.profilers):
                 print(f'{"*" if profiler.is_done else " "} '
                       f'{i + 1}: {profiler.perf_data_path} '
                       f'{os.stat(profiler.perf_data_path).st_size:10,}')
@@ -59,7 +97,7 @@ class Profiler(object):
             print(' +*: Add "-*" to the current options')
             print(' /*: Remove "-*" from the current options')
             print('  x: Exit, ^C: Keep data and exit')
-            prompt = (f'Run "pprof {shlex.join(options.pprof)}" for: ')
+            prompt = (f'Run "pprof {shlex.join(self.pprof)}" for: ')
             print(prompt, end='', flush=True)
             line = sys.stdin.readline().rstrip()
             if not line:
@@ -67,51 +105,28 @@ class Profiler(object):
             if line == 'x':
                 break
             if line[0] == '-':
-                options.pprof = shlex.split(line)
+                self.pprof = shlex.split(line)
                 continue
             if line[0] == '+':
-                options.pprof.extend(shlex.split('-' + line[1:]))
+                self.pprof.extend(shlex.split('-' + line[1:]))
                 continue
             if line[0] == '/':
                 for option in shlex.split('-' + line[1:]):
                     try:
-                        options.pprof.remove(option)
+                        self.pprof.remove(option)
                     except ValueError:
                         print(f'The "{option}" is not in the current options: '
-                              f'{options.pprof}')
+                              f'{self.pprof}')
                 continue
             try:
                 i = int(line) - 1
-                profiler = profilers[i]
-                profiler.pprof(options=options.pprof)
+                profiler = self.profilers[i]
+                profiler.pprof(options=self.pprof)
                 profiler.is_done = True
             except ValueError:
                 print(f'"{line}" not recognized.')
-        for profiler in profilers:
+        for profiler in self.profilers:
             os.unlink(profiler.perf_data_path)
-
-
-def run(args, options):
-    logger.info('Starting: %s', shlex.join(args))
-    target = subprocess.Popen(args,
-                              stdin=subprocess.DEVNULL,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT,
-                              text=True)
-    profilers = []
-    pid_pattern = re.compile(
-        r'Renderer \((\d+)\) paused waiting for debugger to attach. '
-        r'Send SIGUSR1 to unpause.')
-    for line in iter(target.stdout.readline, ''):
-        print(line, end='', flush=True)
-        match = pid_pattern.search(line)
-        if match:
-            pid = int(match[1])
-            profiler = Profiler(pid, frequency=options.frequency)
-            profilers.append(profiler)
-            os.kill(pid, signal.SIGUSR1)
-            logger.info('SIGUSR1 %d', pid)
-    return profilers
 
 
 def main():
@@ -121,22 +136,11 @@ def main():
     parser.add_argument('-F', '--frequency', help='perf frequency')
     parser.add_argument('--pprof', default=['-web'], help='pprof options', nargs='*')
     parser.add_argument('args', nargs='*')
-    options = parser.parse_args()
+    profilers = Profilers()
+    parser.parse_args(namespace=profilers)
     logging.basicConfig(level=logging.INFO)
-    args = [
-        options.target,
-        '--renderer-startup-dialog',
-        '--no-sandbox',
-        '--no-first-run',
-        '--no-default-browser-check',
-        '--remote-debugging-port=9999',
-        '--user-data-dir=/tmp/chromium',
-    ]
-    args += options.args
-    profilers = run(args, options)
-    for profiler in profilers:
-        profiler.wait()
-    Profiler.interactive(profilers, options)
+    profilers.run()
+    profilers.interactive()
 
 
 if __name__ == '__main__':
