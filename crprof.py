@@ -32,7 +32,7 @@ class Profiler(object):
         if frequency:
             args.extend(['-F', frequency])
         self.perf = subprocess.Popen(args)
-        logger.info('Profiler for pid %d started: %s', pid, args)
+        logger.info('Profiler for pid %d started: %s', pid, shlex.join(args))
 
     def wait(self):
         logger.debug('Waiting for perf to finish...')
@@ -55,7 +55,9 @@ class Profiler(object):
                 print(f'{"*" if profiler.is_done else " "} '
                       f'{i + 1}: {profiler.perf_data_path} '
                       f'{os.stat(profiler.perf_data_path).st_size:10,}')
-            print(' -*: Change options (e.g., "-web -show_from=BlockNode::Layout")')
+            print(' -*: Set options (e.g., "-web -show_from=BlockNode::Layout")')
+            print(' +*: Add "-*" to the current options')
+            print(' /*: Remove "-*" from the current options')
             print('  x: Exit, ^C: Keep data and exit')
             prompt = (f'Run "pprof {shlex.join(options.pprof)}" for: ')
             print(prompt, end='', flush=True)
@@ -66,6 +68,17 @@ class Profiler(object):
                 break
             if line[0] == '-':
                 options.pprof = shlex.split(line)
+                continue
+            if line[0] == '+':
+                options.pprof.extend(shlex.split('-' + line[1:]))
+                continue
+            if line[0] == '/':
+                for option in shlex.split('-' + line[1:]):
+                    try:
+                        options.pprof.remove(option)
+                    except ValueError:
+                        print(f'The "{option}" is not in the current options: '
+                              f'{options.pprof}')
                 continue
             try:
                 i = int(line) - 1
@@ -79,7 +92,7 @@ class Profiler(object):
 
 
 def run(args, options):
-    logger.info('Starting %s', args)
+    logger.info('Starting: %s', shlex.join(args))
     target = subprocess.Popen(args,
                               stdin=subprocess.DEVNULL,
                               stdout=subprocess.PIPE,
