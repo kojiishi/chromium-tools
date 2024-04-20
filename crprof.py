@@ -7,6 +7,7 @@
 # https://source.chromium.org/chromium/chromium/src/+/main:docs/linux/profiling.md
 #
 import argparse
+import json
 import logging
 import os
 import re
@@ -14,6 +15,7 @@ import shlex
 import signal
 import subprocess
 import sys
+from pathlib import Path
 
 logger = logging.getLogger('crprof')
 
@@ -49,6 +51,7 @@ class Profiler(object):
 
 class Profilers(object):
     def __init__(self) -> None:
+        self.pprof = ['-web']
         self.profilers = []
 
     def run(self):
@@ -136,19 +139,39 @@ class Profilers(object):
         for profiler in self.profilers:
             os.unlink(profiler.perf_data_path)
 
+    @staticmethod
+    def settings_path() -> Path:
+        return Path.home() / '.config/crprof.json'
+
+    def load_settings(self):
+        path = self.settings_path()
+        if not path.exists(): return
+        with path.open() as fp:
+            options = json.load(fp)
+            self.pprof = options.get('pprof', ['-web'])
+
+    def save_settings(self):
+        path = self.settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        options = {'pprof': self.pprof}
+        with path.open('w') as fp:
+            json.dump(options, fp)
+
 
 def main():
+    profilers = Profilers()
+    profilers.load_settings()
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--target',
                         default=os.path.join(os.environ.get('OUT'), 'chrome'))
     parser.add_argument('-F', '--frequency', help='perf frequency')
-    parser.add_argument('--pprof', default=['-web'], help='pprof options', nargs='*')
+    parser.add_argument('--pprof', default=profilers.pprof, help='pprof options', nargs='*')
     parser.add_argument('args', nargs='*')
-    profilers = Profilers()
     parser.parse_args(namespace=profilers)
     logging.basicConfig(level=logging.INFO)
     profilers.run()
     profilers.interactive()
+    profilers.save_settings()
 
 
 if __name__ == '__main__':
