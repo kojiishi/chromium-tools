@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import signal
+from types import SimpleNamespace
 import subprocess
 import sys
 from pathlib import Path
@@ -51,12 +52,13 @@ class Profiler(object):
 
 class Profilers(object):
     def __init__(self) -> None:
-        self.pprof = ['-web']
+        self.options = SimpleNamespace(pprof=['-web'])
         self.profilers = []
 
     def run(self):
+        options = self.options
         args = [
-            self.target,
+            options.target,
             '--renderer-startup-dialog',
             '--no-sandbox',
             '--no-first-run',
@@ -64,7 +66,7 @@ class Profilers(object):
             '--remote-debugging-port=9999',
             '--user-data-dir=/tmp/chromium',
         ]
-        args += self.args
+        args += options.args
         logger.info('Starting: %s', shlex.join(args))
         target = subprocess.Popen(args,
                                 stdin=subprocess.DEVNULL,
@@ -80,7 +82,7 @@ class Profilers(object):
             match = pid_pattern.search(line)
             if match:
                 pid = int(match[1])
-                profiler = Profiler(pid, frequency=self.frequency)
+                profiler = Profiler(pid, frequency=options.frequency)
                 profilers.append(profiler)
                 os.kill(pid, signal.SIGUSR1)
                 logger.info('SIGUSR1 %d', pid)
@@ -89,6 +91,7 @@ class Profilers(object):
         self.profilers = profilers
 
     def interactive(self):
+        options = self.options
         for profiler in self.profilers:
             profiler.is_done = False
         while True:
@@ -101,7 +104,7 @@ class Profilers(object):
             print(' /*: Remove "-*" from the current options')
             print('  s: Substitute strings in the current options')
             print('  q: Quit, ^C: Keep data and exit')
-            prompt = (f'Run "pprof {shlex.join(self.pprof)}" for: ')
+            prompt = (f'Run "pprof {shlex.join(self.options.pprof)}" for: ')
             print(prompt, end='', flush=True)
             line = sys.stdin.readline().rstrip()
             if not line:
@@ -109,30 +112,30 @@ class Profilers(object):
             if line == 'q':
                 break
             if line[0] == '-':
-                self.pprof = shlex.split(line)
+                options.pprof = shlex.split(line)
                 continue
             if line[0] == '+':
-                self.pprof.extend(shlex.split('-' + line[1:]))
+                options.pprof.extend(shlex.split('-' + line[1:]))
                 continue
             if line[0] == '/':
                 for option in shlex.split('-' + line[1:]):
                     try:
-                        self.pprof.remove(option)
+                        options.pprof.remove(option)
                     except ValueError:
                         print(f'The "{option}" is not in the current options: '
-                              f'{self.pprof}')
+                              f'{options.pprof}')
                 continue
             if line[0] == 's':
                 match = re.match(r'/([^/]*)/([^/]*)/?$', line[1:])
                 if match:
                     old = match.group(1)
                     new = match.group(2)
-                    self.pprof = [i.replace(old, new) for i in self.pprof]
+                    options.pprof = [i.replace(old, new) for i in options.pprof]
                     continue
             try:
                 i = int(line) - 1
                 profiler = self.profilers[i]
-                profiler.pprof(options=self.pprof)
+                profiler.pprof(options=options.pprof)
                 profiler.is_done = True
             except ValueError:
                 print(f'"{line}" not recognized.')
@@ -147,27 +150,26 @@ class Profilers(object):
         path = self.settings_path()
         if not path.exists(): return
         with path.open() as fp:
-            options = json.load(fp)
-            self.pprof = options.get('pprof', ['-web'])
+            self.options = json.load(fp, object_hook=lambda d: SimpleNamespace(**d))
 
     def save_settings(self):
         path = self.settings_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        options = {'pprof': self.pprof}
         with path.open('w') as fp:
-            json.dump(options, fp)
+            json.dump(self.options, fp, indent=2, default=lambda d: d.__dict__)
 
 
 def main():
     profilers = Profilers()
     profilers.load_settings()
+    options = profilers.options
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--target',
                         default=os.path.join(os.environ.get('OUT'), 'chrome'))
     parser.add_argument('-F', '--frequency', help='perf frequency')
-    parser.add_argument('--pprof', default=profilers.pprof, help='pprof options', nargs='*')
+    parser.add_argument('--pprof', default=options.pprof, help='pprof options', nargs='*')
     parser.add_argument('args', nargs='*')
-    parser.parse_args(namespace=profilers)
+    parser.parse_args(namespace=options)
     logging.basicConfig(level=logging.INFO)
     profilers.run()
     profilers.interactive()
