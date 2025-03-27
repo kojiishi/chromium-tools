@@ -164,13 +164,16 @@ def main():
     profilers.load_settings()
     options = profilers.options
     parser = argparse.ArgumentParser()
-    parser.add_argument('-t', '--target',
-                        default=os.path.join(os.environ.get('OUT'), 'chrome'))
+    parser.add_argument('-t', '--target', default=os.environ.get('OUT'))
     parser.add_argument('-F', '--frequency', help='perf frequency')
     parser.add_argument('--pprof', default=options.pprof, help='pprof options', nargs='*')
     parser.add_argument('args', nargs='*')
     parser.parse_args(namespace=options)
+
     logging.basicConfig(level=logging.INFO)
+    if os.path.isdir(options.target):
+        options.target = os.path.join(options.target, 'chrome')
+
     profilers.run()
     profilers.interactive()
     profilers.save_settings()
