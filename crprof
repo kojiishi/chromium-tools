@@ -1,0 +1,4 @@
+#!/bin/bash
+MY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PY_DIR="$MY_DIR/py"
+uv run --project "$PY_DIR" "$PY_DIR/crprof.py" "$@"
