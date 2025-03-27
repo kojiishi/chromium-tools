@@ -96,6 +96,9 @@ class Profilers(object):
             profiler.is_done = False
         while True:
             for i, profiler in enumerate(self.profilers):
+                if not os.path.exists(profiler.perf_data_path):
+                    logger.warning(f'{profiler.perf_data_path} not found')
+                    continue
                 print(f'{"*" if profiler.is_done else " "} '
                       f'{i + 1}: {profiler.perf_data_path} '
                       f'{os.stat(profiler.perf_data_path).st_size:10,}')
@@ -140,6 +143,9 @@ class Profilers(object):
             except ValueError:
                 print(f'"{line}" not recognized.')
         for profiler in self.profilers:
+            if not os.path.exists(profiler.perf_data_path):
+                logger.warning(f'{profiler.perf_data_path} not found')
+                continue
             os.unlink(profiler.perf_data_path)
 
     @staticmethod
