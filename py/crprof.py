@@ -189,6 +189,9 @@ def main():
     if os.path.isdir(options.target):
         options.target = os.path.join(options.target, 'chrome')
 
+    for (name, value) in options.__dict__.items():
+        logger.info('Option %s: %s', name, value)
+
     profilers.run()
     profilers.interactive()
     profilers.save_settings()
