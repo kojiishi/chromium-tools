@@ -22,18 +22,15 @@ logger = logging.getLogger('crprof')
 
 
 class Profiler(object):
-    def __init__(self, pid, frequency=None):
+    def __init__(self, pid, perf_record_options=None):
         self.pid = pid
         self.perf_data_path = f'perf-{pid}.data'
         args = [
             'perf', 'record', '-g', '-p',
             str(pid), '-o', self.perf_data_path
         ]
-        # On virtualized systems, the PMU counters may not be available or may
-        # be broken. b/313526654
-        args.extend(['-e', 'cpu-clock'])
-        if frequency:
-            args.extend(['-F', frequency])
+        if perf_record_options:
+            args.extend(perf_record_options)
         self.perf = subprocess.Popen(args)
         logger.info('Profiler for pid %d started: %s', pid, shlex.join(args))
 
@@ -49,6 +46,14 @@ class Profiler(object):
         logger.info('Running %s', args)
         subprocess.run(args)
 
+    @staticmethod
+    def get_perf_record_options(cli_args):
+        options = []
+        if cli_args.frequency:
+            options.extend(['-F', cli_args.frequency])
+        if cli_args.event:
+            options.extend(['-e', cli_args.event])
+        return options
 
 class Profilers(object):
     def __init__(self) -> None:
@@ -77,12 +82,13 @@ class Profilers(object):
         pid_pattern = re.compile(
             r'Renderer \((\d+)\) paused waiting for debugger to attach. '
             r'Send SIGUSR1 to unpause.')
+        perf_record_options = Profiler.get_perf_record_options(options)
         for line in iter(target.stdout.readline, ''):
             print(line, end='', flush=True)
             match = pid_pattern.search(line)
             if match:
                 pid = int(match[1])
-                profiler = Profiler(pid, frequency=options.frequency)
+                profiler = Profiler(pid, perf_record_options)
                 profilers.append(profiler)
                 os.kill(pid, signal.SIGUSR1)
                 logger.info('SIGUSR1 %d', pid)
@@ -172,6 +178,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-t', '--target', default=os.environ.get('OUT'))
     parser.add_argument('-F', '--frequency', help='perf frequency')
+    # On virtualized systems, the PMU counters may not be available or may
+    # be broken. Use `-e cpu-clock`. b/313526654
+    parser.add_argument('-e', '--event', help='The PMU event for `perf`')
     parser.add_argument('--pprof', default=options.pprof, help='pprof options', nargs='*')
     parser.add_argument('args', nargs='*')
     parser.parse_args(namespace=options)
