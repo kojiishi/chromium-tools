@@ -23,8 +23,6 @@
   },
   "dependencies": {
     "filecompare": "^1.0.4",
-    "glob": "^13.0.6",
-    "request": "^2.88.2",
-    "request-promise-native": "^0.0.0"
+    "glob": "^13.0.6"
   }
 }
