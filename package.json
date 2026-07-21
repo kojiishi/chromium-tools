@@ -18,8 +18,7 @@
   "homepage": "https://github.com/kojiishi/tools#readme",
   "devDependencies": {
     "fs-extra": "^11.3.6",
-    "minimist": "^1.2.8",
-    "mocha": "*"
+    "minimist": "^1.2.8"
   },
   "dependencies": {
     "filecompare": "^1.0.4",
