@@ -11,9 +11,6 @@ updates:
       dependencies:
         patterns:
           - '*'
-        update-types:
-          - "minor"
-          - "patch"
 
   - package-ecosystem: "uv"
     directory: "/py"
