@@ -17,14 +17,14 @@
   },
   "homepage": "https://github.com/kojiishi/tools#readme",
   "devDependencies": {
-    "mocha": "*",
     "fs-extra": "^5.0.0",
-    "minimist": "^1.2.2"
+    "minimist": "^1.2.2",
+    "mocha": "*"
   },
   "dependencies": {
     "filecompare": "^1.0.4",
     "glob": "^7.1.5",
     "request": "^2.88.0",
-    "request-promise-native": "^1.0.7"
+    "request-promise-native": "^0.0.0"
   }
 }
